@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.42" stop-color="#faf5ff"/>
+      <stop offset="1" stop-color="#dbeafe"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="42%" r="55%">
+      <stop offset="0" stop-color="#c084fc" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="36" stdDeviation="32" flood-color="#7c3aed" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="900" fill="url(#bg)"/>
+  <rect width="1200" height="900" fill="url(#glow)"/>
+  <ellipse cx="600" cy="735" rx="310" ry="52" fill="#7c3aed" opacity="0.13"/>
+  <g filter="url(#shadow)">
+    <rect x="462" y="285" width="276" height="390" rx="48" fill="#f8fafc" stroke="#ddd6fe" stroke-width="4"/>
+    <rect x="490" y="248" width="220" height="70" rx="26" fill="#7c3aed"/>
+    <rect x="512" y="200" width="176" height="68" rx="24" fill="#a78bfa"/>
+    <rect x="518" y="390" width="164" height="118" rx="24" fill="#ede9fe"/>
+    <text x="600" y="436" text-anchor="middle" fill="#4c1d95" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="900">LUMI</text>
+    <text x="600" y="472" text-anchor="middle" fill="#6d28d9" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="800">night cream</text>
+  </g>
+  <circle cx="395" cy="555" r="42" fill="#bfdbfe" opacity="0.72"/>
+  <circle cx="790" cy="384" r="34" fill="#ddd6fe" opacity="0.86"/>
+  <path d="M396 654c80-30 139-29 198 4 54 30 119 33 202-5" fill="none" stroke="#93c5fd" stroke-width="16" stroke-linecap="round" opacity="0.65"/>
+</svg>

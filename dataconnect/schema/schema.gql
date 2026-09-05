@@ -1,0 +1,115 @@
+type SaviUser @table(name: "savi_users") @unique(fields: ["provider", "providerSubject"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  provider: String!
+  providerSubject: String!
+  email: String! @unique
+  displayName: String!
+  avatarUrl: String
+  status: String! @default(value: "active")
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+  lastLoginAt: Timestamp! @default(expr: "request.time")
+}
+
+type CreditAccount @table(name: "credit_accounts") {
+  id: UUID! @default(expr: "uuidV4()")
+  userId: UUID! @unique
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  availableCredits: Int! @default(value: 0)
+  reservedCredits: Int! @default(value: 0)
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type GenerationJob @table(name: "generation_jobs") @unique(fields: ["userId", "clientRequestId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  toolId: String!
+  provider: String!
+  model: String!
+  status: String!
+  reservedCredits: Int! @default(value: 0)
+  finalCredits: Int! @default(value: 0)
+  clientRequestId: String!
+  providerRequestId: String
+  retryCount: Int! @default(value: 0)
+  failureCategory: String
+  failureMessage: String
+  usageMetadata: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  startedAt: Timestamp
+  completedAt: Timestamp
+  failedAt: Timestamp
+}
+
+type CreditReservation @table(name: "credit_reservations") {
+  id: UUID! @default(expr: "uuidV4()")
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  jobId: UUID! @unique
+  job: GenerationJob! @ref(fields: "jobId", references: "id")
+  amount: Int!
+  status: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+  finalizedAt: Timestamp
+  releasedAt: Timestamp
+}
+
+type CreditTransaction @table(name: "credit_transactions") {
+  id: UUID! @default(expr: "uuidV4()")
+  eventKey: String! @unique
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  jobId: UUID
+  job: GenerationJob @ref(fields: "jobId", references: "id")
+  reservationId: UUID
+  reservation: CreditReservation @ref(fields: "reservationId", references: "id")
+  type: String!
+  amount: Int!
+  reason: String!
+  metadata: String
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type Asset @table(name: "assets") {
+  id: UUID! @default(expr: "uuidV4()")
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  jobId: UUID! @unique
+  job: GenerationJob! @ref(fields: "jobId", references: "id")
+  toolId: String!
+  mediaType: String!
+  mimeType: String!
+  storagePath: String! @unique
+  filename: String!
+  sizeBytes: Int
+  status: String!
+  creditCost: Int!
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type AiUsage @table(name: "ai_usage") {
+  id: UUID! @default(expr: "uuidV4()")
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  jobId: UUID! @unique
+  job: GenerationJob! @ref(fields: "jobId", references: "id")
+  toolId: String!
+  provider: String!
+  model: String!
+  inputReferenceCount: Int! @default(value: 0)
+  imageCount: Int! @default(value: 0)
+  resolution: String
+  durationMs: Int
+  retryCount: Int! @default(value: 0)
+  success: Boolean!
+  providerRequestId: String
+  inputTokens: Int
+  outputTokens: Int
+  creditsReserved: Int! @default(value: 0)
+  creditsCharged: Int! @default(value: 0)
+  creditsReleased: Int! @default(value: 0)
+  metadata: String
+  createdAt: Timestamp! @default(expr: "request.time")
+}

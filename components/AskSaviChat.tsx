@@ -1,0 +1,2288 @@
+'use client';
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { TemplateItem } from '@/lib/templates';
+import type { ToolMode } from '@/components/ToolModeSelector';
+import type { SidebarMode } from '@/components/SaviSidebar';
+import { recordMediaItem } from '@/lib/mediaLibrary';
+import { getSaviAgentTool, type SaviAgentPlan, type SaviAgentToolId } from '@/lib/ai/saviAgent';
+import { useSaviAuth } from '@/lib/auth/useSaviAuth';
+
+type AssistantTool =
+  | 'smart_chat'
+  | 'image_text'
+  | 'voice_tts'
+  | 'radio_talk'
+  | 'video_script'
+  | 'video_studio'
+  | 'file_studio'
+  | 'image_studio';
+
+type PendingAction = {
+  id: string;
+  tool: AssistantTool;
+  title: string;
+  mode: ToolMode;
+  prompt: string;
+  cost: number;
+  reason: string;
+  canRunInChat: boolean;
+  toolId?: string;
+  language?: 'fa' | 'en';
+  swapPages?: [number, number];
+  followUpVoice?: boolean;
+  attachmentIds?: string[];
+  attachments?: ChatAttachment[];
+  voice?: string;
+  style?: string;
+  intro?: string;
+  agentToolId?: SaviAgentToolId;
+  requiredInput?: 'none' | 'text' | 'image' | 'pdf' | 'video' | 'audio';
+  aspectRatio?: '1:1' | '16:9' | '9:16' | '4:5';
+  quality?: '720' | '1080' | '4K';
+  duration?: '4' | '6' | '8';
+};
+
+type AgentPlanResponse = SaviAgentPlan & {
+  title: string;
+  creditCost: number;
+  requiredInput: PendingAction['requiredInput'];
+  output: ChatResult['type'] | 'chat';
+};
+
+type ToolDraft = {
+  tool: 'voice_tts' | 'radio_talk';
+  stage: 'text' | 'settings';
+  text?: string;
+  language?: 'fa' | 'en';
+};
+
+type ChatResult = {
+  type: 'text' | 'image' | 'audio' | 'video' | 'file';
+  text?: string;
+  url?: string;
+  filename?: string;
+  helper?: string;
+};
+
+type ChatAttachmentKind = 'image' | 'pdf' | 'video' | 'audio' | 'file';
+
+type ChatAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  kind: ChatAttachmentKind;
+  file: File;
+  base64: string;
+  previewUrl?: string;
+};
+
+type ChatAttachmentPreview = Pick<ChatAttachment, 'id' | 'name' | 'mimeType' | 'size' | 'kind' | 'previewUrl'>;
+
+type ChatMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: number;
+  attachments?: ChatAttachmentPreview[];
+  pendingAction?: PendingAction;
+  quickReplies?: string[];
+  result?: ChatResult;
+  status?: 'idle' | 'running' | 'error';
+};
+
+type ChatSession = {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: ChatMessage[];
+};
+
+const CHAT_STORAGE_KEY = 'savi.ask.chat.v2';
+const CHAT_SESSIONS_KEY = 'savi.chat.sessions.v1';
+const ACTIVE_CHAT_KEY = 'savi.chat.active.v1';
+const CHAT_SESSIONS_EVENT = 'savi-chat-sessions-updated';
+const CHAT_NEW_EVENT = 'savi-new-chat-requested';
+const CHAT_OPEN_EVENT = 'savi-open-chat-requested';
+const CHAT_DELETE_EVENT = 'savi-chat-deleted';
+const OUTPUT_STORAGE_KEY = 'savi.ask.outputs.v2';
+const MAX_MEMORY_MESSAGES = 50;
+const MAX_CHAT_ATTACHMENTS = 6;
+const MAX_CHAT_ATTACHMENT_SIZE = 25 * 1024 * 1024;
+const WELCOME_HEADLINES = [
+  'What do you want to create?',
+  'What should we build today?',
+  'What idea are we turning into output?',
+  'Ask. Create. Organise.',
+  'What can SAVI help you shape?',
+  'Ready when your idea is.'
+];
+
+const PDF_TOOL_COSTS: Record<string, number> = {
+  organize_pdf: 35,
+  merge_pdf: 25,
+  pdf_to_jpg: 45,
+  contract_summary: 5,
+  explain_document: 4,
+  translate_summary: 7,
+  pdf_podcast: 8
+};
+
+const PDF_TOOL_TITLES: Record<string, string> = {
+  organize_pdf: 'Organize PDF pages',
+  merge_pdf: 'Merge PDF',
+  pdf_to_jpg: 'PDF to JPG',
+  contract_summary: 'Contract Summary',
+  explain_document: 'Explain Document',
+  translate_summary: 'Translate PDF',
+  pdf_podcast: 'PDF to Podcast Script'
+};
+
+function makeId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function loadStoredMessages() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const value = window.localStorage.getItem(CHAT_STORAGE_KEY);
+    if (!value) return [];
+    const parsed = JSON.parse(value) as ChatMessage[];
+    return Array.isArray(parsed) ? parsed.slice(-MAX_MEMORY_MESSAGES) : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadStoredOutputs() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const value = window.localStorage.getItem(OUTPUT_STORAGE_KEY);
+    if (!value) return [];
+    const parsed = JSON.parse(value) as ChatMessage[];
+    return Array.isArray(parsed) ? parsed.slice(0, 10) : [];
+  } catch {
+    return [];
+  }
+}
+
+function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function isMatch(text: string, terms: string[]) {
+  const lower = text.toLowerCase();
+  return terms.some((term) => lower.includes(term));
+}
+
+function normalizeDigits(text: string) {
+  const persianDigits = '۰۱۲۳۴۵۶۷۸۹';
+  const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
+  return text.replace(/[۰-۹٠-٩]/g, (digit) => {
+    const persianIndex = persianDigits.indexOf(digit);
+    if (persianIndex >= 0) return String(persianIndex);
+    const arabicIndex = arabicDigits.indexOf(digit);
+    return arabicIndex >= 0 ? String(arabicIndex) : digit;
+  });
+}
+
+function isPersian(text: string) {
+  return /[\u0600-\u06FF]/.test(text);
+}
+
+function userLanguage(text: string): 'fa' | 'en' {
+  if (/\b(salam|khobi|mikham|mikhay?m|mikhastam|safhe|safha|safah|safahat|safheha|jabe|jabeja|biad|biare|bere|bzar|bfrst|tabdil|seda|voice|aks|ax|matn|gharar|inja|baram|beshe|mishe|mikhastm|bede)\b/i.test(text)) {
+    return 'fa';
+  }
+  return isPersian(text) ? 'fa' : 'en';
+}
+
+function localizedText(language: 'fa' | 'en', fa: string, en: string) {
+  return language === 'fa' ? fa : en;
+}
+
+function wantsPdfPageOrganization(message: string) {
+  const lower = normalizeDigits(message).toLowerCase();
+  return isMatch(lower, [
+    'organize page',
+    'organize pages',
+    'reorder page',
+    'reorder pages',
+    'swap page',
+    'move page',
+    'page order',
+    'pages order',
+    'sort pages',
+    'moratab',
+    'safhe',
+    'safheha',
+    'safhe hasho',
+    'safhehasho',
+    'safha',
+    'safah',
+    'safahat',
+    'safahatesho',
+    'page ha',
+    'page hasho',
+    'pagehasho',
+    'jabe ja',
+    'jabeja',
+    'ja be ja',
+    'bere be',
+    'biad be',
+    'biare be',
+    'page ha',
+    'barge',
+    'مرتب',
+    'جابه',
+    'جابجا',
+    'جا به جا',
+    'صفحه',
+    'صفحات',
+    'صفحه‌ها',
+    'صفحه هاشو',
+    'صفحه‌هاشو',
+    'برگه',
+    'برگ',
+    'بذار صفحه',
+    'بیاد صفحه'
+  ]);
+}
+
+function parseSwapPages(message: string): [number, number] | null {
+  const lower = normalizeDigits(message).toLowerCase();
+  const direct = lower.match(/(?:page|pages|صفحه|صفحات|safhe|safah|safahat|safahate?)\s*(\d{1,3})[\s\S]{0,120}?(?:page|pages|صفحه|صفحات|safhe|safah|safahat|safahate?)?\s*(\d{1,3})/);
+  if (direct) {
+    const first = Number(direct[1]);
+    const second = Number(direct[2]);
+    if (first > 0 && second > 0 && first !== second) return [first, second];
+  }
+
+  const numbers = Array.from(lower.matchAll(/\d{1,3}/g)).map((match) => Number(match[0])).filter((value) => value > 0);
+  const hasPageMovementLanguage = /\b(page|pages|safhe|safha|safah|safahat|safheha|safahatesho|moratab|jabe|jabeja|bere|biad|biare|move|swap|reorder|organize|sort)\b|صفحه|صفحات|مرتب|جابه|جابجا|جا به جا|بیاد|بره|بذار/.test(lower);
+  if (numbers.length >= 2 && hasPageMovementLanguage && numbers[0] !== numbers[1]) {
+    return [numbers[0], numbers[1]];
+  }
+
+  return null;
+}
+
+function wantsPdfVoice(message: string) {
+  const lower = normalizeDigits(message).toLowerCase();
+  return isMatch(lower, ['podcast', 'radio', 'voice', 'audio', 'tts', 'seda', 'vis', 'وویس', 'ویس', 'صدا', 'رادیو', 'پادکست']);
+}
+
+function wantsPdfTranslation(message: string) {
+  const lower = normalizeDigits(message).toLowerCase();
+  return isMatch(lower, [
+    'translate',
+    'translation',
+    'tarjome',
+    'tarjoma',
+    'tarjomash',
+    'tarjomeh',
+    'translate to persian',
+    'to farsi',
+    'same layout',
+    'same format',
+    'همون شکل',
+    'همان شکل',
+    'ترجمه',
+    'فارسی',
+    'فارس',
+    'همون فرم',
+    'همان فرم'
+  ]);
+}
+
+function defaultPdfPrompt(toolId: string, language: 'fa' | 'en') {
+  if (toolId === 'translate_summary') {
+    return localizedText(
+      language,
+      'این PDF را به فارسی روان ترجمه کن و تا جای ممکن ساختار، تیترها، ترتیب بخش‌ها و قالب اصلی را حفظ کن. در پایان اگر لازم بود یک خلاصه کوتاه هم بده.',
+      'Translate this PDF into clear Persian and preserve the original structure, headings, section order, and format as much as possible. Add a short summary only if useful.'
+    );
+  }
+  if (toolId === 'contract_summary') {
+    return localizedText(
+      language,
+      'این قرارداد را خلاصه کن؛ نکات اصلی، ریسک‌ها، تعهدات، تاریخ‌ها، مبلغ‌ها و قدم بعدی را واضح بنویس.',
+      'Summarize this contract with key points, risks, obligations, dates, amounts, and next actions.'
+    );
+  }
+  if (toolId === 'pdf_podcast') {
+    return localizedText(
+      language,
+      'این PDF را به یک متن پادکست رادیویی کوتاه و قابل خواندن تبدیل کن؛ مقدمه، نکات اصلی و جمع‌بندی داشته باشد.',
+      'Turn this PDF into a short readable radio podcast script with an intro, main points, and recap.'
+    );
+  }
+  return localizedText(
+    language,
+    'این سند را ساده و قابل فهم توضیح بده؛ بگو موضوع چیست، چه چیزهایی مهم است و قدم بعدی چیست.',
+    'Explain this PDF simply: what it is, what matters, and what the next step should be.'
+  );
+}
+
+function makeSequentialPagePlan(pageCount: number, swapPages?: [number, number]) {
+  const plan = Array.from({ length: pageCount }, (_, index) => ({
+    pageNumber: index + 1,
+    rotation: 0
+  }));
+
+  if (swapPages) {
+    const [first, second] = swapPages;
+    if (first >= 1 && second >= 1 && first <= pageCount && second <= pageCount) {
+      const firstIndex = first - 1;
+      const secondIndex = second - 1;
+      [plan[firstIndex], plan[secondIndex]] = [plan[secondIndex], plan[firstIndex]];
+    }
+  }
+
+  return plan;
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getAttachmentKind(file: File): ChatAttachmentKind {
+  if (file.type.startsWith('image/')) return 'image';
+  if (file.type.startsWith('video/')) return 'video';
+  if (file.type.startsWith('audio/')) return 'audio';
+  if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) return 'pdf';
+  return 'file';
+}
+
+function readFileAsBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      resolve(result.includes(',') ? result.split(',').pop() || '' : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('File could not be read.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function attachmentPreview(item: ChatAttachment): ChatAttachmentPreview {
+  return {
+    id: item.id,
+    name: item.name,
+    mimeType: item.mimeType,
+    size: item.size,
+    kind: item.kind,
+    previewUrl: item.previewUrl
+  };
+}
+
+function inferToolIdFromImagePrompt(message: string, hasImage: boolean) {
+  const lower = message.toLowerCase();
+  if (!hasImage) return 'text_to_image';
+  if (isMatch(lower, ['remove background', 'background', 'بک گراند', 'پس زمینه', 'پس‌زمینه'])) return 'remove_background';
+  if (isMatch(lower, ['remove object', 'delete object', 'hazf', 'حذف', 'پاک کن', 'پاک'])) return 'remove_object';
+  if (isMatch(lower, ['clothes', 'outfit', 'style', 'لباس', 'استایل'])) return 'change_style';
+  if (isMatch(lower, ['mockup', 'موکاپ', 'product', 'محصول'])) return 'mockup';
+  return 'edit_image';
+}
+
+function inferPdfToolId(message: string) {
+  const lower = message.toLowerCase();
+  if (parseSwapPages(lower)) return 'organize_pdf';
+  if (wantsPdfPageOrganization(lower)) return 'organize_pdf';
+  if (wantsPdfVoice(lower)) return 'pdf_podcast';
+  if (wantsPdfTranslation(lower)) return 'translate_summary';
+  if (isMatch(lower, ['contract', 'agreement', 'قرارداد'])) return 'contract_summary';
+  return 'explain_document';
+}
+
+function inferActionWithAttachments(message: string, attachments: ChatAttachment[]): PendingAction | null {
+  if (!attachments.length) return null;
+  const prompt = message.trim();
+  const imageAttachments = attachments.filter((item) => item.kind === 'image');
+  const pdfAttachments = attachments.filter((item) => item.kind === 'pdf');
+  const videoAttachments = attachments.filter((item) => item.kind === 'video');
+
+  if (pdfAttachments.length) {
+    const toolId = inferPdfToolId(prompt);
+    const language = userLanguage(prompt);
+    const swapPages = parseSwapPages(prompt);
+    if (toolId === 'organize_pdf' && !swapPages) {
+      return {
+        id: makeId(),
+        tool: 'file_studio',
+        title: PDF_TOOL_TITLES.organize_pdf,
+        mode: 'Files',
+        prompt: prompt || 'Organize this PDF.',
+        cost: 0,
+        reason: localizedText(
+          language,
+          `فایل ${pdfAttachments[0].name} را دارم. فقط ترتیب دقیق صفحات را بگو؛ مثلا «صفحه ۱ و ۲ را جابه‌جا کن».`,
+          `I have ${pdfAttachments[0].name}. Tell me the exact page order, for example: "swap page 1 and page 2".`
+        ),
+        canRunInChat: false,
+        toolId,
+        language,
+        attachmentIds: [pdfAttachments[0].id],
+        attachments: [pdfAttachments[0]]
+      };
+    }
+
+    return {
+      id: makeId(),
+      tool: 'file_studio',
+      title: PDF_TOOL_TITLES[toolId] || 'PDF Tool',
+      mode: 'Files',
+      prompt: prompt || (toolId === 'organize_pdf' ? 'Organize this PDF.' : defaultPdfPrompt(toolId, language)),
+      cost: PDF_TOOL_COSTS[toolId] ?? PDF_TOOL_COSTS.explain_document,
+      reason: localizedText(language, `فایل ${pdfAttachments[0].name} آماده است. همین‌جا خروجی را می‌سازم.`, `I can process ${pdfAttachments[0].name} in this chat and return the result here.`),
+      canRunInChat: true,
+      toolId,
+      language,
+      swapPages: swapPages || undefined,
+      followUpVoice: wantsPdfVoice(prompt),
+      attachmentIds: [pdfAttachments[0].id],
+      attachments: [pdfAttachments[0]]
+    };
+  }
+
+  if (imageAttachments.length) {
+    if (isMatch(prompt, ['video', 'animate', 'reel', 'motion', 'ویدیو', 'ويديو', 'کلیپ', 'متحرک', 'انیمیت'])) {
+      return {
+        id: makeId(),
+        tool: 'video_studio',
+        title: 'Image to Video',
+        mode: 'Video',
+        prompt: prompt || 'Animate this image into a short polished SAVI video.',
+        cost: 900,
+        reason: `I can use the uploaded image as a video reference and create the clip here.`,
+        canRunInChat: true,
+        toolId: 'image_video',
+        attachmentIds: imageAttachments.slice(0, 3).map((item) => item.id),
+        attachments: imageAttachments.slice(0, 3)
+      };
+    }
+
+    const toolId = inferToolIdFromImagePrompt(prompt, true);
+    return {
+      id: makeId(),
+      tool: 'image_studio',
+      title: toolId === 'remove_background' ? 'Remove Background' : toolId === 'remove_object' ? 'Remove Object' : toolId === 'change_style' ? 'Change Style' : toolId === 'mockup' ? 'Mockup' : 'Edit Image',
+      mode: 'Images',
+      prompt: prompt || 'Edit this image while preserving the original subject.',
+      cost: toolId === 'remove_background' ? 200 : toolId === 'remove_object' ? 250 : toolId === 'change_style' ? 250 : toolId === 'mockup' ? 160 : 200,
+      reason: `I can use the uploaded image and create the output here.`,
+      canRunInChat: true,
+      toolId,
+      attachmentIds: imageAttachments.slice(0, toolId === 'mockup' ? 2 : 3).map((item) => item.id),
+      attachments: imageAttachments.slice(0, toolId === 'mockup' ? 2 : 3)
+    };
+  }
+
+  if (videoAttachments.length) {
+    return {
+      id: makeId(),
+      tool: 'video_studio',
+      title: 'Video Tool',
+      mode: 'Video',
+      prompt: prompt || 'Use this reference video and create a polished SAVI output.',
+      cost: 900,
+      reason: `I can send this reference to the video tool. I will ask confirmation before generation.`,
+      canRunInChat: true,
+      toolId: 'extend',
+      attachmentIds: videoAttachments.slice(0, 3).map((item) => item.id),
+      attachments: videoAttachments.slice(0, 3)
+    };
+  }
+
+  return null;
+}
+
+function inferContextualToolKind(message: string): ChatAttachmentKind | null {
+  const lower = message.toLowerCase();
+  if (
+    isMatch(lower, ['pdf', 'document', 'contract', 'file', 'page', 'pages', 'پی دی اف', 'پی‌دی‌اف', 'فایل', 'سند', 'قرارداد', 'صفحه', 'صفحات']) ||
+    parseSwapPages(lower) ||
+    wantsPdfPageOrganization(lower)
+  ) {
+    return 'pdf';
+  }
+
+  if (isMatch(lower, ['image', 'photo', 'picture', 'عکس', 'تصویر'])) return 'image';
+  if (isMatch(lower, ['video', 'clip', 'ویدیو', 'ويديو', 'کلیپ'])) return 'video';
+  if (isMatch(lower, ['audio', 'voice', 'صدا', 'ویس', 'وویس'])) return 'audio';
+  return null;
+}
+
+function updateMessage(messages: ChatMessage[], id: string, updates: Partial<ChatMessage>) {
+  return messages.map((message) => (message.id === id ? { ...message, ...updates } : message));
+}
+
+function getTextDirection(text: string): 'rtl' | 'ltr' {
+  return /[\u0600-\u06FF]/.test(text) ? 'rtl' : 'ltr';
+}
+
+function createChatTitle(messages: ChatMessage[]) {
+  const firstUserMessage = messages.find((message) => message.role === 'user')?.content.trim();
+  if (!firstUserMessage) return 'New chat';
+  return firstUserMessage.replace(/\s+/g, ' ').slice(0, 42);
+}
+
+function createEmptySession(): ChatSession {
+  const now = Date.now();
+  return {
+    id: makeId(),
+    title: 'New chat',
+    createdAt: now,
+    updatedAt: now,
+    messages: []
+  };
+}
+
+function loadStoredSessions(): ChatSession[] {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const value = window.localStorage.getItem(CHAT_SESSIONS_KEY);
+    if (value) {
+      const parsed = JSON.parse(value) as ChatSession[];
+      if (Array.isArray(parsed)) return parsed;
+    }
+
+    const oldMessages = loadStoredMessages();
+    if (oldMessages.length) {
+      const now = Date.now();
+      return [{
+        id: makeId(),
+        title: createChatTitle(oldMessages),
+        createdAt: oldMessages[0]?.createdAt || now,
+        updatedAt: oldMessages[oldMessages.length - 1]?.createdAt || now,
+        messages: oldMessages.slice(-MAX_MEMORY_MESSAGES)
+      }];
+    }
+  } catch {
+    return [];
+  }
+
+  return [];
+}
+
+function loadInitialChatState() {
+  const sessions = loadStoredSessions();
+  if (sessions.length) {
+    const activeId = typeof window === 'undefined' ? '' : window.localStorage.getItem(ACTIVE_CHAT_KEY);
+    const activeSession = sessions.find((session) => session.id === activeId) ?? sessions[0];
+    return {
+      sessions,
+      activeChatId: activeSession.id,
+      messages: activeSession.messages.slice(-MAX_MEMORY_MESSAGES)
+    };
+  }
+
+  const empty = createEmptySession();
+  return {
+    sessions: [empty],
+    activeChatId: empty.id,
+    messages: []
+  };
+}
+
+function extractQuotedOrLongText(message: string) {
+  const markerMatch = message.match(/(?:text|matn|متن)\s*[:：]\s*([\s\S]+)/i);
+  if (markerMatch?.[1]?.trim()) return markerMatch[1].trim();
+
+  const quoteMatch = message.match(/["“”']([^"“”']{24,})["“”']/);
+  if (quoteMatch?.[1]?.trim()) return quoteMatch[1].trim();
+
+  if (message.includes('\n') || message.length > 150) return message.trim();
+  return '';
+}
+
+function voiceSettingsFromText(message: string) {
+  const lower = message.toLowerCase();
+  const wantsMale = /(male|man|mard|مرد|پسر)/.test(lower);
+  const wantsFemale = /(female|woman|zan|زن|دختر)/.test(lower);
+  const voice = wantsMale ? 'Puck' : wantsFemale ? 'Kore' : 'Kore';
+
+  const tone = /(formal|رسمی|جدی)/.test(lower)
+    ? 'formal'
+    : /(excited|fast|سریع|هیجانی|انرژ)/.test(lower)
+      ? 'excited'
+      : /(calm|slow|warm|آرام|ملایم|گرم)/.test(lower)
+        ? 'warm calm'
+        : 'natural';
+
+  const speed = /(fast|سریع)/.test(lower) ? 'fast pace' : /(slow|آرام)/.test(lower) ? 'slow pace' : 'normal pace';
+  return { voice, style: `${tone}, ${speed}, clear natural delivery` };
+}
+
+function actionFromTemplate(template: TemplateItem, prompt: string): PendingAction {
+  if (template.inputType === 'PDF') {
+    return {
+      id: makeId(),
+      tool: 'file_studio',
+      title: template.title,
+      mode: 'Files',
+      prompt,
+      cost: template.credits,
+      reason: 'This needs a PDF. I will open the exact file workflow for you.',
+      canRunInChat: false
+    };
+  }
+
+  if (template.inputType === 'Image') {
+    return {
+      id: makeId(),
+      tool: 'image_studio',
+      title: template.title,
+      mode: 'Images',
+      prompt,
+      cost: template.credits,
+      reason: 'This needs an image upload. I will open the image workflow for you.',
+      canRunInChat: false
+    };
+  }
+
+  if (template.id === 'blog-to-audio') {
+    return {
+      id: makeId(),
+      tool: 'voice_tts',
+      title: 'Text to Speech',
+      mode: 'Voice',
+      prompt,
+      cost: 30,
+      reason: 'I can make this into downloadable audio.',
+      canRunInChat: true,
+      voice: 'Kore',
+      style: 'natural text to speech, warm clear delivery'
+    };
+  }
+
+  if (template.id === 'video-ad-script') {
+    return {
+      id: makeId(),
+      tool: 'video_script',
+      title: template.title,
+      mode: 'Video',
+      prompt,
+      cost: template.credits,
+      reason: 'This script can be generated directly here.',
+      canRunInChat: true
+    };
+  }
+
+  return {
+    id: makeId(),
+    tool: 'smart_chat',
+    title: template.title,
+    mode: 'Ask AI',
+    prompt,
+    cost: template.credits,
+    reason: 'This text workflow can run directly here.',
+    canRunInChat: true
+  };
+}
+
+function detectAction(message: string, template?: TemplateItem): PendingAction {
+  const prompt = message.trim();
+  const language = userLanguage(prompt);
+  if (template) return actionFromTemplate(template, prompt || template.prompt);
+  const mentionsImage = isMatch(prompt, ['image', 'photo', 'picture', 'aks', 'ax', 'عکس', 'تصویر']);
+  const wantsImageEdit = isMatch(prompt, ['edit', 'change', 'modify', 'remove', 'replace', 'retouch', 'taghir', 'taghyir', 'hazf', 'عوض', 'تغییر', 'ویرایش', 'ادیت', 'حذف']);
+  const swapPages = parseSwapPages(prompt);
+  const wantsOrganizePdf = Boolean(swapPages) || wantsPdfPageOrganization(prompt);
+  const wantsTranslatePdf = wantsPdfTranslation(prompt);
+
+    if (
+      wantsOrganizePdf ||
+      wantsTranslatePdf ||
+      isMatch(prompt, ['pdf', 'document', 'contract', 'file', 'merge', 'organize pages', 'summarize pdf', 'translate pdf', 'پی دی اف', 'پی‌دی‌اف', 'فایل', 'قرارداد', 'سند'])
+  ) {
+    const toolId = wantsOrganizePdf ? 'organize_pdf' : wantsTranslatePdf ? 'translate_summary' : undefined;
+    return {
+      id: makeId(),
+      tool: 'file_studio',
+      title: toolId ? PDF_TOOL_TITLES[toolId] : 'File tools',
+      mode: 'Files',
+      prompt: prompt || (toolId ? defaultPdfPrompt(toolId, language) : ''),
+      cost: toolId ? PDF_TOOL_COSTS[toolId] : 0,
+      reason: 'This needs upload, preview, or page controls.',
+      canRunInChat: false,
+      toolId,
+      language,
+      swapPages: swapPages || undefined
+    };
+  }
+
+  if (isMatch(prompt, ['remove background', 'remove object', 'change clothes', 'edit image', 'image edit', 'حذف بک', 'حذف پس', 'عوض کردن لباس', 'تغییر لباس']) || (mentionsImage && wantsImageEdit)) {
+    return {
+      id: makeId(),
+      tool: 'image_studio',
+      title: 'Image editing',
+      mode: 'Images',
+      prompt,
+      cost: 200,
+      reason: 'This needs an uploaded image and edit controls.',
+      canRunInChat: false
+    };
+  }
+
+  if (isMatch(prompt, ['text to image', 'generate image', 'create image', 'make image', 'photo', 'picture', 'nano banana', 'تصویر', 'عکس', 'بساز عکس'])) {
+    return {
+      id: makeId(),
+      tool: 'image_text',
+      title: 'Text to Image',
+      mode: 'Images',
+      prompt,
+      cost: 125,
+      reason: 'I can create this image directly in chat.',
+      canRunInChat: true
+    };
+  }
+
+  if (isMatch(prompt, ['radio', 'podcast', 'talk show', 'رادیو', 'پادکست', 'رادیویی'])) {
+    return {
+      id: makeId(),
+      tool: 'radio_talk',
+      title: 'Radio Talk AI',
+      mode: 'Voice',
+      prompt,
+      cost: 120,
+      reason: 'I can shape this into a hosted radio segment with audio.',
+      canRunInChat: true
+    };
+  }
+
+  if (isMatch(prompt, ['text to speech', 'text to voice', 'tts', 'voice', 'audio', 'read this', 'speech', 'matn', 'matno', 'tabdil', 'صدا', 'ویس', 'وویس', 'بخون', 'متن'])) {
+    return {
+      id: makeId(),
+      tool: 'voice_tts',
+      title: 'Text to Speech',
+      mode: 'Voice',
+      prompt,
+      cost: 30,
+      reason: 'I can turn the text into downloadable audio.',
+      canRunInChat: true
+    };
+  }
+
+  if (isMatch(prompt, ['video', 'veo', 'reel', 'animate', 'ویدیو', 'ويديو', 'کلیپ', 'ریل', 'ریلز'])) {
+    const wantsScript = isMatch(prompt, ['script', 'ad script', 'سناریو', 'اسکریپت', 'تبلیغ']);
+    return {
+      id: makeId(),
+      tool: wantsScript ? 'video_script' : 'video_studio',
+      title: wantsScript ? 'Video ad script' : 'Video tools',
+      mode: 'Video',
+      prompt,
+      cost: wantsScript ? 5 : 900,
+      reason: wantsScript ? 'I can write the script here.' : 'Video needs duration, ratio, references, and confirmation.',
+      canRunInChat: true,
+      toolId: wantsScript ? undefined : 'text_video'
+    };
+  }
+
+  return {
+    id: makeId(),
+    tool: 'smart_chat',
+    title: 'Ask SAVI',
+    mode: 'Ask AI',
+    prompt,
+    cost: 0,
+    reason: 'Normal chat is free.',
+    canRunInChat: true
+  };
+}
+
+function agentToolToAssistantTool(toolId: SaviAgentToolId): AssistantTool {
+  if (['text_to_image', 'story_sketch', 'text_design'].includes(toolId)) return 'image_text';
+  if (['edit_image', 'remove_background', 'remove_object', 'change_style', 'mockup', 'visual_mixer', 'sketch_to_image', 'product_photo', 'variations'].includes(toolId)) return 'image_studio';
+  if (toolId === 'text_to_speech') return 'voice_tts';
+  if (toolId === 'radio_talk') return 'radio_talk';
+  if (['text_video', 'story_video', 'image_video', 'first_last_video', 'product_ad_video', 'social_reel_video', 'extend_video'].includes(toolId)) return 'video_studio';
+  if (['merge_pdf', 'organize_pdf', 'pdf_to_jpg', 'extract_pdf_images', 'contract_summary', 'explain_document', 'translate_pdf', 'pdf_podcast'].includes(toolId)) return 'file_studio';
+  if (toolId === 'video_script') return 'video_script';
+  return 'smart_chat';
+}
+
+function agentToolApiId(toolId: SaviAgentToolId) {
+  const mapping: Partial<Record<SaviAgentToolId, string>> = {
+    first_last_video: 'first_last',
+    product_ad_video: 'product_ad',
+    social_reel_video: 'social_reel',
+    extend_video: 'extend',
+    translate_pdf: 'translate_summary',
+    extract_pdf_images: 'extract_images'
+  };
+  return mapping[toolId] || toolId;
+}
+
+function toolAttachmentsForPlan(plan: AgentPlanResponse, attachments: ChatAttachment[]) {
+  if (plan.requiredInput === 'pdf') return attachments.filter((item) => item.kind === 'pdf');
+  if (plan.requiredInput === 'image') return attachments.filter((item) => item.kind === 'image');
+  if (plan.requiredInput === 'video') return attachments.filter((item) => item.kind === 'video');
+  if (plan.requiredInput === 'audio') return attachments.filter((item) => item.kind === 'audio');
+  return [];
+}
+
+function actionFromAgentPlan(plan: AgentPlanResponse, attachments: ChatAttachment[]): PendingAction {
+  const tool = getSaviAgentTool(plan.toolId);
+  const toolId = agentToolApiId(plan.toolId);
+  const actionAttachments = toolAttachmentsForPlan(plan, attachments);
+  const assistantTool = agentToolToAssistantTool(plan.toolId);
+  const requiresUpload = ['image', 'pdf', 'video', 'audio'].includes(plan.requiredInput || tool.requiredInput);
+  const hasRequiredInput = !requiresUpload || actionAttachments.length > 0;
+  const shouldRunInChat = plan.intent === 'tool' && hasRequiredInput;
+  const language = plan.language || userLanguage(plan.prompt);
+
+  return {
+    id: makeId(),
+    tool: assistantTool,
+    title: tool.title,
+    mode: tool.category === 'image' ? 'Images' : tool.category === 'voice' ? 'Voice' : tool.category === 'video' ? 'Video' : tool.category === 'file' ? 'Files' : 'Ask AI',
+    prompt: plan.prompt,
+    cost: plan.creditCost,
+    reason: plan.reply,
+    intro: plan.reply,
+    canRunInChat: shouldRunInChat,
+    toolId: assistantTool === 'smart_chat' || assistantTool === 'video_script' || assistantTool === 'voice_tts' || assistantTool === 'radio_talk' ? undefined : toolId,
+    language,
+    swapPages: plan.pageA && plan.pageB ? [plan.pageA, plan.pageB] : undefined,
+    followUpVoice: plan.nextToolId === 'text_to_speech' || plan.nextToolId === 'radio_talk',
+    attachments: actionAttachments.slice(0, plan.toolId === 'mockup' ? 2 : 3),
+    attachmentIds: actionAttachments.slice(0, plan.toolId === 'mockup' ? 2 : 3).map((item) => item.id),
+    voice: plan.voice,
+    style: plan.style,
+    agentToolId: plan.toolId,
+    requiredInput: plan.requiredInput,
+    aspectRatio: plan.aspectRatio,
+    quality: plan.quality,
+    duration: plan.duration
+  };
+}
+
+export function AskSaviChat({
+  credits,
+  onCreditsChange,
+  onOpenTool,
+  template,
+  templateLaunchKey = 0,
+  initialMessage = '',
+  initialMessageLaunchKey = 0
+}: {
+  credits: number;
+  onCreditsChange: (credits: number) => void;
+  onOpenTool: (mode: SidebarMode, template?: TemplateItem) => void;
+  template?: TemplateItem;
+  templateLaunchKey?: number;
+  initialMessage?: string;
+  initialMessageLaunchKey?: number;
+}) {
+  const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
+  // Storage is browser-only. Hydrating it after the first render prevents a
+  // server/client mismatch when an existing chat is present in localStorage.
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [activeChatId, setActiveChatId] = useState('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [savedOutputs, setSavedOutputs] = useState<ChatMessage[]>([]);
+  const [chatHydrated, setChatHydrated] = useState(false);
+  const [input, setInput] = useState('');
+  const [draftTemplate, setDraftTemplate] = useState<TemplateItem | undefined>();
+  const [toolDraft, setToolDraft] = useState<ToolDraft | undefined>();
+  const [runningActionId, setRunningActionId] = useState<string | null>(null);
+  const [showQuickMenu, setShowQuickMenu] = useState(false);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [uploadError, setUploadError] = useState('');
+  const [welcomeHeadline, setWelcomeHeadline] = useState(WELCOME_HEADLINES[0]);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const actionAttachmentStoreRef = useRef<Record<string, ChatAttachment[]>>({});
+  const pendingUploadActionRef = useRef<PendingAction | null>(null);
+  const recentAttachmentsRef = useRef<Record<ChatAttachmentKind, ChatAttachment[]>>({
+    image: [],
+    pdf: [],
+    video: [],
+    audio: [],
+    file: []
+  });
+  const handledInitialMessageKey = useRef(0);
+  const handledRouteChat = useRef(false);
+
+  const visibleMessages = useMemo(() => {
+    if (messages.length) return messages;
+    return [
+      {
+        id: 'welcome',
+        role: 'assistant' as const,
+        createdAt: Date.now(),
+        content:
+          'Tell me what you want to do. Chat is free. When a tool is needed, I will ask for the missing details, show the credit cost, and wait for your confirmation.'
+      }
+    ];
+  }, [messages]);
+
+  useEffect(() => {
+    const initial = loadInitialChatState();
+    setChatSessions(initial.sessions);
+    setActiveChatId(initial.activeChatId);
+    setMessages(initial.messages);
+    setSavedOutputs(loadStoredOutputs());
+    setChatHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!chatHydrated || typeof window === 'undefined') return;
+    const activeSession = chatSessions.find((session) => session.id === activeChatId);
+    if (!activeSession) return;
+    setMessages(activeSession.messages.slice(-MAX_MEMORY_MESSAGES));
+  }, [activeChatId]);
+
+  useEffect(() => {
+    setWelcomeHeadline(WELCOME_HEADLINES[Math.floor(Math.random() * WELCOME_HEADLINES.length)]);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setChatSessions((current) => {
+      const now = Date.now();
+      const next = current.map((session) =>
+        session.id === activeChatId
+          ? {
+              ...session,
+              title: createChatTitle(messages),
+              updatedAt: messages.length ? now : session.updatedAt,
+              messages: messages.slice(-MAX_MEMORY_MESSAGES)
+            }
+          : session
+      );
+      return next.sort((a, b) => b.updatedAt - a.updatedAt);
+    });
+    window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages.slice(-MAX_MEMORY_MESSAGES)));
+  }, [activeChatId, chatHydrated, messages]);
+
+  useEffect(() => {
+    if (!chatHydrated || typeof window === 'undefined') return;
+    window.localStorage.setItem(CHAT_SESSIONS_KEY, JSON.stringify(chatSessions.slice(0, 40)));
+    window.localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId);
+    window.dispatchEvent(new CustomEvent(CHAT_SESSIONS_EVENT));
+  }, [activeChatId, chatHydrated, chatSessions]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    function createNewChatFromEvent() {
+      createNewChat();
+    }
+
+    function openChatFromEvent(event: Event) {
+      const chatId = (event as CustomEvent<{ chatId?: string }>).detail?.chatId;
+      if (chatId) openChat(chatId);
+    }
+
+    function deleteChatFromEvent(event: Event) {
+      const chatId = (event as CustomEvent<{ chatId?: string }>).detail?.chatId;
+      const nextSessions = loadStoredSessions();
+      if (!nextSessions.length) {
+        const empty = createEmptySession();
+        setChatSessions([empty]);
+        setActiveChatId(empty.id);
+        setMessages([]);
+        return;
+      }
+
+      setChatSessions(nextSessions);
+      if (chatId === activeChatId) {
+        const fallback = nextSessions[0];
+        setActiveChatId(fallback.id);
+        setMessages(fallback.messages.slice(-MAX_MEMORY_MESSAGES));
+      }
+    }
+
+    window.addEventListener(CHAT_NEW_EVENT, createNewChatFromEvent);
+    window.addEventListener(CHAT_OPEN_EVENT, openChatFromEvent);
+    window.addEventListener(CHAT_DELETE_EVENT, deleteChatFromEvent);
+    return () => {
+      window.removeEventListener(CHAT_NEW_EVENT, createNewChatFromEvent);
+      window.removeEventListener(CHAT_OPEN_EVENT, openChatFromEvent);
+      window.removeEventListener(CHAT_DELETE_EVENT, deleteChatFromEvent);
+    };
+  }, [activeChatId, chatSessions]);
+
+  useEffect(() => {
+    if (!chatHydrated || handledRouteChat.current || typeof window === 'undefined') return;
+    handledRouteChat.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('newChat') === '1') {
+      createNewChat();
+      window.history.replaceState(null, '', '/workspace');
+      return;
+    }
+
+    const chatId = params.get('chat');
+    if (chatId) openChat(chatId);
+  }, [chatHydrated, chatSessions]);
+
+  useEffect(() => {
+    if (!chatHydrated || typeof window === 'undefined') return;
+    window.localStorage.setItem(OUTPUT_STORAGE_KEY, JSON.stringify(savedOutputs.slice(0, 10)));
+  }, [chatHydrated, savedOutputs]);
+
+  useEffect(() => {
+    scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, runningActionId]);
+
+  useEffect(() => {
+    if (!template || templateLaunchKey === 0) return;
+    setDraftTemplate(template);
+    setInput(`${template.prompt}\n\n`);
+  }, [template, templateLaunchKey]);
+
+  useEffect(() => {
+    if (!chatHydrated || !initialMessage.trim() || initialMessageLaunchKey === 0) return;
+    if (handledInitialMessageKey.current === initialMessageLaunchKey) return;
+    handledInitialMessageKey.current = initialMessageLaunchKey;
+    void submitText(initialMessage);
+  }, [chatHydrated, initialMessage, initialMessageLaunchKey]);
+
+  function createNewChat() {
+    const session = createEmptySession();
+    setChatSessions((current) => [session, ...current]);
+    setActiveChatId(session.id);
+    setMessages([]);
+    setDraftTemplate(undefined);
+    setToolDraft(undefined);
+    setAttachments([]);
+    setUploadError('');
+    actionAttachmentStoreRef.current = {};
+    pendingUploadActionRef.current = null;
+    recentAttachmentsRef.current = { image: [], pdf: [], video: [], audio: [], file: [] };
+    setRunningActionId(null);
+  }
+
+  function openChat(chatId: string) {
+    const session = chatSessions.find((item) => item.id === chatId);
+    if (!session) return;
+    setActiveChatId(session.id);
+    setMessages(session.messages.slice(-MAX_MEMORY_MESSAGES));
+    setDraftTemplate(undefined);
+    setToolDraft(undefined);
+    setAttachments([]);
+    setUploadError('');
+    actionAttachmentStoreRef.current = {};
+    pendingUploadActionRef.current = null;
+    recentAttachmentsRef.current = { image: [], pdf: [], video: [], audio: [], file: [] };
+    setRunningActionId(null);
+  }
+
+  function inferContextualAttachments(message: string) {
+    const kind = inferContextualToolKind(message);
+    if (!kind) return [];
+    return recentAttachmentsRef.current[kind] || [];
+  }
+
+  function rememberActionAttachments(items: ChatAttachment[]) {
+    for (const item of items) {
+      recentAttachmentsRef.current[item.kind] = [item, ...recentAttachmentsRef.current[item.kind].filter((existing) => existing.id !== item.id)].slice(0, 6);
+    }
+  }
+
+  function continuePendingUploadAction(newAttachments: ChatAttachment[]) {
+    const pending = pendingUploadActionRef.current;
+    if (!pending) return;
+
+    const uploadedPdfs = newAttachments.filter((item) => item.kind === 'pdf');
+    const pdf = uploadedPdfs[0];
+    if (pending.tool === 'file_studio' && pdf) {
+      const language = pending.language || userLanguage(pending.prompt);
+      const toolId = pending.toolId || inferPdfToolId(pending.prompt);
+      const allPdfs = [...uploadedPdfs, ...recentAttachmentsRef.current.pdf]
+        .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index);
+
+      if (toolId === 'merge_pdf') {
+        if (allPdfs.length < 2) {
+          pendingUploadActionRef.current = { ...pending, attachments: allPdfs, attachmentIds: allPdfs.map((item) => item.id) };
+          addAssistantMessage(
+            localizedText(language, 'برای ادغام، یک PDF دیگر هم با دکمه + اضافه کن.', 'Add one more PDF with the + button so I can merge them.')
+          );
+          return;
+        }
+
+        pendingUploadActionRef.current = null;
+        addPendingAction({
+          ...pending,
+          id: makeId(),
+          canRunInChat: true,
+          attachments: allPdfs,
+          attachmentIds: allPdfs.map((item) => item.id),
+          reason: localizedText(language, `${allPdfs.length} فایل آماده ادغام هستند.`, `${allPdfs.length} PDFs are ready to merge.`),
+          intro: pending.reason
+        });
+        return;
+      }
+
+      pendingUploadActionRef.current = null;
+      const swapPages = pending.swapPages || parseSwapPages(pending.prompt);
+
+      if (toolId === 'organize_pdf' && !swapPages) {
+        addAssistantMessage(
+          localizedText(
+            language,
+            `فایل ${pdf.name} را گرفتم. فقط ترتیب دقیق صفحات را بگو؛ مثلا «صفحه ۱ و ۲ را جابه‌جا کن». تا وقتی تایید نکنی credit کم نمی‌شود.`,
+            `I have ${pdf.name}. Tell me the exact page order, for example: "swap page 1 and page 2". No credits are used until you confirm.`
+          )
+        );
+        pendingUploadActionRef.current = { ...pending, attachments: [pdf], attachmentIds: [pdf.id] };
+        return;
+      }
+
+      addPendingAction({
+        ...pending,
+        id: makeId(),
+        title: PDF_TOOL_TITLES[toolId] || pending.title,
+        prompt: pending.prompt || defaultPdfPrompt(toolId, language),
+        cost: PDF_TOOL_COSTS[toolId] ?? pending.cost,
+        reason: localizedText(
+          language,
+          toolId === 'translate_summary'
+            ? `فایل ${pdf.name} آماده است. آن را به فارسی ترجمه می‌کنم و ساختار متن را تا جای ممکن نگه می‌دارم.`
+            : `فایل ${pdf.name} آماده است. همین‌جا خروجی را می‌سازم.`,
+          toolId === 'translate_summary'
+            ? `${pdf.name} is ready. I will translate it into Persian and preserve the structure as much as possible.`
+            : `${pdf.name} is ready. I can return the output here.`
+        ),
+        canRunInChat: true,
+        toolId,
+        language,
+        swapPages: swapPages || undefined,
+        attachments: [pdf],
+        attachmentIds: [pdf.id],
+        followUpVoice: pending.followUpVoice || wantsPdfVoice(pending.prompt)
+      });
+      return;
+    }
+
+    const imageAttachments = newAttachments.filter((item) => item.kind === 'image');
+    if (pending.tool === 'image_studio' && imageAttachments.length) {
+      pendingUploadActionRef.current = null;
+      addPendingAction({
+        ...pending,
+        id: makeId(),
+        canRunInChat: true,
+        attachments: imageAttachments.slice(0, pending.toolId === 'mockup' ? 2 : 3),
+        attachmentIds: imageAttachments.slice(0, pending.toolId === 'mockup' ? 2 : 3).map((item) => item.id),
+        reason: localizedText(pending.language || userLanguage(pending.prompt), 'تصویر آماده است. خروجی را همین‌جا می‌سازم.', 'The image is ready. I can create the output here.'),
+        intro: pending.reason
+      });
+      return;
+    }
+
+    const videoReferences = newAttachments.filter((item) => item.kind === 'image' || item.kind === 'video');
+    if (pending.tool === 'video_studio' && videoReferences.length) {
+      pendingUploadActionRef.current = null;
+      addPendingAction({
+        ...pending,
+        id: makeId(),
+        canRunInChat: true,
+        attachments: videoReferences.slice(0, 3),
+        attachmentIds: videoReferences.slice(0, 3).map((item) => item.id),
+        reason: localizedText(pending.language || userLanguage(pending.prompt), 'رفرنس آماده است. ویدئو را همین‌جا می‌سازم.', 'Your reference is ready. I can create the video here.'),
+        intro: pending.reason
+      });
+    }
+  }
+
+  async function submit() {
+    await submitText(input, attachments);
+  }
+
+  function conversationHistory() {
+    return messages
+      .filter((message) => message.status !== 'running')
+      .slice(-14)
+      .map((message) => ({ role: message.role, content: message.content }));
+  }
+
+  async function planWithSaviAgent(message: string, currentAttachments: ChatAttachment[]) {
+    const knownAttachments = Object.values(recentAttachmentsRef.current).flat();
+    const attachmentMap = new Map<string, ChatAttachment>();
+    [...currentAttachments, ...knownAttachments].forEach((item) => attachmentMap.set(item.id, item));
+
+    const response = await fetch('/api/ai/agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        history: conversationHistory(),
+        attachments: Array.from(attachmentMap.values()).map((item) => ({
+          id: item.id,
+          name: item.name,
+          mimeType: item.mimeType,
+          size: item.size,
+          kind: item.kind
+        }))
+      })
+    });
+    const data = (await response.json().catch(() => ({}))) as { plan?: AgentPlanResponse; error?: string };
+    if (!response.ok || !data.plan) throw new Error(data.error || 'SAVI could not understand this request.');
+    return { plan: data.plan, attachments: Array.from(attachmentMap.values()) };
+  }
+
+  async function submitText(rawMessage: string, submittedAttachments: ChatAttachment[] = []) {
+    const clean = rawMessage.trim();
+    if ((!clean && !submittedAttachments.length) || runningActionId) return;
+
+    const userMessage: ChatMessage = {
+      id: makeId(),
+      role: 'user',
+      content: clean || `Uploaded ${submittedAttachments.length} file${submittedAttachments.length === 1 ? '' : 's'}.`,
+      attachments: submittedAttachments.map(attachmentPreview),
+      createdAt: Date.now()
+    };
+
+    setInput('');
+    setAttachments([]);
+    setUploadError('');
+    setMessages((current) => [...current, userMessage].slice(-MAX_MEMORY_MESSAGES));
+
+    if (!clean && submittedAttachments.length) {
+      const language = userLanguage(submittedAttachments.map((item) => item.name).join(' '));
+      addAssistantMessage(
+        localizedText(
+          language,
+          'فایل را گرفتم. می‌خواهی با آن چه کاری انجام بدهم؟',
+          'I have the file. What would you like me to do with it?'
+        )
+      );
+      rememberActionAttachments(submittedAttachments);
+      return;
+    }
+
+    if (toolDraft) {
+      handleDraftReply(clean);
+      return;
+    }
+
+    rememberActionAttachments(submittedAttachments);
+
+    const contextualAttachments = submittedAttachments.length
+      ? submittedAttachments
+      : inferContextualAttachments(clean);
+    let action: PendingAction;
+
+    if (draftTemplate) {
+      action = actionFromTemplate(draftTemplate, clean || draftTemplate.prompt);
+      setDraftTemplate(undefined);
+    } else {
+      setRunningActionId('savi-agent');
+      try {
+        const { plan, attachments: agentAttachments } = await planWithSaviAgent(clean, contextualAttachments);
+        if (plan.intent === 'chat' || plan.toolId === 'chat') {
+          await runFreeChat(clean, conversationHistory());
+          return;
+        }
+
+        action = actionFromAgentPlan(plan, agentAttachments);
+        if (plan.intent === 'question') {
+          if (action.tool === 'voice_tts' || action.tool === 'radio_talk') {
+            const language = action.language || userLanguage(clean);
+            const expectedText = plan.missingInput === 'text';
+            if (expectedText) {
+              setToolDraft({ tool: action.tool, stage: 'text', language });
+              addAssistantMessage(plan.reply, plan.quickReplies);
+              return;
+            }
+
+            setToolDraft({
+              tool: action.tool,
+              stage: 'settings',
+              text: action.prompt,
+              language
+            });
+            addAssistantMessage(plan.reply, plan.quickReplies);
+            return;
+          }
+
+          if (['image_studio', 'video_studio', 'file_studio'].includes(action.tool)) {
+            pendingUploadActionRef.current = action;
+          }
+          addAssistantMessage(plan.reply, plan.quickReplies);
+          return;
+        }
+      } catch {
+        const attachmentAction = inferActionWithAttachments(clean, contextualAttachments);
+        action = attachmentAction ?? detectAction(clean);
+      } finally {
+        setRunningActionId(null);
+      }
+    }
+
+    if (action.tool === 'smart_chat' && action.cost === 0) {
+      await runFreeChat(clean, conversationHistory());
+      return;
+    }
+
+    if (action.tool === 'voice_tts') {
+      const text = extractQuotedOrLongText(action.prompt) || extractQuotedOrLongText(clean);
+      if (!text) {
+        const language = action.language || userLanguage(clean);
+        setToolDraft({ tool: 'voice_tts', stage: 'text', language });
+        addAssistantMessage(
+          localizedText(
+            language,
+            'حتماً. متن دقیقی که می‌خواهی به صدا تبدیل شود را بفرست؛ بعد صدای گوینده، لحن و سرعت را می‌پرسم.',
+            'Sure. Send me the exact text you want to turn into voice. After that I will ask for voice, tone, and speed.'
+          )
+        );
+        return;
+      }
+      const language = action.language || userLanguage(clean);
+      setToolDraft({ tool: 'voice_tts', stage: 'settings', text, language });
+      addAssistantMessage(
+        localizedText(language, 'متن را گرفتم. قبل از ساخت صدا، سبک صدا را انتخاب کن.', 'Got the text. Choose the voice style before I make the audio.'),
+        language === 'fa'
+          ? ['صدای زن، گرم، سرعت معمولی', 'صدای مرد، واضح، سرعت معمولی', 'صدای زن، آرام، کند', 'صدای مرد، پرانرژی، سریع']
+          : ['Female, warm, normal speed', 'Male, clear, normal speed', 'Female, calm, slow', 'Male, energetic, fast']
+      );
+      return;
+    }
+
+    if (action.tool === 'radio_talk') {
+      const topic = action.prompt.length > 16 ? action.prompt : clean.length > 16 ? clean : '';
+      if (!topic) {
+        const language = action.language || userLanguage(clean);
+        setToolDraft({ tool: 'radio_talk', stage: 'text', language });
+        addAssistantMessage(
+          localizedText(
+            language,
+            'موضوع یا متن کوتاه برنامه رادیویی را بفرست؛ بعد سبک مجری را انتخاب می‌کنیم.',
+            'Give me the topic or notes for the radio segment. Then I will ask for the host style.'
+          ),
+          language === 'fa'
+            ? ['سبک پادکست تکنولوژی', 'سبک خبر آرام', 'مجری رادیویی گرم']
+            : ['Tech podcast style', 'Calm news style', 'Warm radio host']
+        );
+        return;
+      }
+      const language = action.language || userLanguage(clean);
+      setToolDraft({ tool: 'radio_talk', stage: 'settings', text: topic, language });
+      addAssistantMessage(
+        localizedText(language, 'قبل از ساخت پادکست، سبک رادیو را انتخاب کن.', 'Choose the radio style before I generate the podcast audio.'),
+        language === 'fa'
+          ? ['مجری رادیویی گرم', 'گوینده خبر', 'پادکست تکنولوژی پرانرژی']
+          : ['Warm radio host', 'News anchor', 'Energetic tech podcast']
+      );
+      return;
+    }
+
+    if (!action.canRunInChat) {
+      if (action.tool === 'file_studio') {
+        pendingUploadActionRef.current = action;
+        if (action.toolId === 'organize_pdf') {
+          const pdf = recentAttachmentsRef.current.pdf[0];
+          if (pdf) {
+            const swapPages = action.swapPages || parseSwapPages(clean);
+            if (!swapPages) {
+              addAssistantMessage(
+                localizedText(
+                  action.language || userLanguage(clean),
+                  `فایل ${pdf.name} را دارم. برای مرتب‌سازی هیچ credit کم نمی‌کنم تا دقیق بگویی چه ترتیبی می‌خواهی؛ مثلا: «صفحه ۱ و ۲ را جابه‌جا کن».`,
+                  `I still have ${pdf.name}. I will not use credits until you confirm the exact order. Tell me the page order, for example: "swap page 1 and page 2".`
+                )
+              );
+              return;
+            }
+
+            addPendingAction({
+              ...action,
+              id: makeId(),
+              canRunInChat: true,
+              cost: PDF_TOOL_COSTS.organize_pdf,
+              reason: localizedText(
+                action.language || userLanguage(clean),
+                `فایل ${pdf.name} آماده است. صفحه ${swapPages[0]} و ${swapPages[1]} را جابه‌جا می‌کنم و PDF جدید می‌دهم.`,
+                `${pdf.name} is ready. I will swap page ${swapPages[0]} and ${swapPages[1]} and return a new PDF.`
+              ),
+              swapPages,
+              followUpVoice: action.followUpVoice || wantsPdfVoice(clean),
+              attachments: [pdf],
+              attachmentIds: [pdf.id]
+            });
+            return;
+          }
+        }
+
+        addAssistantMessage(
+          localizedText(
+            action.language || userLanguage(clean),
+            action.toolId === 'translate_summary'
+              ? 'PDF را با دکمه + بفرست. بعد از آپلود، همان فایل را به فارسی ترجمه می‌کنم و تا جای ممکن قالب و ترتیب متن را نگه می‌دارم.'
+              : wantsPdfVoice(clean)
+              ? 'PDF را با دکمه + بفرست. اول صفحه‌ها را مرتب می‌کنم؛ بعد می‌توانیم همان خروجی را به صدای رادیویی یا TTS تبدیل کنیم.'
+              : 'PDF را با دکمه + بفرست و دقیق بگو چه کاری می‌خواهی انجام بدهم.',
+            action.toolId === 'translate_summary'
+              ? 'Upload the PDF with the + button. After upload, I will translate that file into Persian and preserve the structure as much as possible.'
+              : wantsPdfVoice(clean)
+              ? 'Upload the PDF with the + button. I will organize the pages first; then we can turn the result into radio audio or TTS.'
+              : 'Upload the PDF with the + button, then tell me what you want done with it. I can return the result here in chat.'
+          )
+        );
+        return;
+      }
+
+      if (action.tool === 'image_studio') {
+        addAssistantMessage('Upload the image with the + button, then describe the change. I can edit it and return the output here in chat.');
+        return;
+      }
+
+      if (action.tool === 'video_studio') {
+        addAssistantMessage('Upload up to 3 image or video references with the + button, then describe the clip you want. I will show the credit cost before generation.');
+        return;
+      }
+
+      addAssistantMessage(`${action.title} is opening now. Upload your file or image there, adjust the settings, and generate from the tool window.`);
+      if (action.mode === 'Images') {
+        onOpenTool('Images', {
+          id: 'image-edit',
+          title: 'Edit image',
+          description: 'Upload an image and describe the change you want.',
+          inputType: 'Image',
+          credits: action.cost,
+          category: 'Images',
+          prompt: action.prompt
+        });
+      } else {
+        onOpenTool(action.mode);
+      }
+      return;
+    }
+
+    addPendingAction(action);
+  }
+
+  function addAssistantMessage(content: string, quickReplies?: string[]) {
+    setMessages((current) => [
+      ...current,
+      {
+        id: makeId(),
+        role: 'assistant' as const,
+        content,
+        quickReplies,
+        createdAt: Date.now()
+      }
+    ].slice(-MAX_MEMORY_MESSAGES));
+  }
+
+  function addPendingAction(action: PendingAction) {
+    const { attachments: actionFiles, ...safeAction } = action;
+    if (actionFiles?.length) {
+      actionAttachmentStoreRef.current[action.id] = actionFiles;
+      rememberActionAttachments(actionFiles);
+    }
+    const language = action.language || userLanguage(action.prompt);
+    setMessages((current) => [
+      ...current,
+      {
+        id: makeId(),
+        role: 'assistant' as const,
+        content: action.canRunInChat
+          ? `${action.intro || localizedText(language, `${action.title} آماده است.`, `${action.title} is ready.`)} ${localizedText(language, `هزینه: ${action.cost} credits. تایید کن تا انجامش بدهم.`, `Cost: ${action.cost} credits. Confirm when you want me to generate it.`)}`
+          : localizedText(language, `${action.title} ابزار درست این کار است. هزینه از ${action.cost} credits شروع می‌شود. ${action.reason}`, `${action.title} is the right tool. Estimated cost starts at ${action.cost} credits. ${action.reason}`),
+        createdAt: Date.now(),
+        pendingAction: safeAction
+      }
+    ].slice(-MAX_MEMORY_MESSAGES));
+  }
+
+  function handleDraftReply(clean: string) {
+    if (!toolDraft) return;
+
+    if (toolDraft.stage === 'text') {
+      const language = toolDraft.language || userLanguage(clean);
+      setToolDraft({ ...toolDraft, stage: 'settings', text: clean });
+      addAssistantMessage(
+        localizedText(
+          language,
+          toolDraft.tool === 'voice_tts' ? 'عالی. حالا سبک صدا را انتخاب کن.' : 'عالی. حالا سبک مجری رادیو را انتخاب کن.',
+          toolDraft.tool === 'voice_tts' ? 'Perfect. Now choose the voice, tone, and speed.' : 'Perfect. Now choose the radio host style.'
+        ),
+        toolDraft.tool === 'voice_tts'
+          ? ['Female, warm, normal speed', 'Male, clear, normal speed', 'Female, calm, slow', 'Male, energetic, fast']
+          : ['Warm radio host', 'News anchor', 'Energetic tech podcast']
+      );
+      return;
+    }
+
+    const settings = voiceSettingsFromText(clean);
+    const cost = toolDraft.tool === 'radio_talk' ? 120 : 30;
+    const title = toolDraft.tool === 'radio_talk' ? 'Radio Talk AI' : 'Text to Speech';
+    const prompt = toolDraft.text || clean;
+    const language = toolDraft.language || userLanguage(prompt);
+
+    setToolDraft(undefined);
+    addPendingAction({
+      id: makeId(),
+      tool: toolDraft.tool,
+      title,
+      mode: 'Voice',
+      prompt,
+      cost,
+      reason: `Voice: ${settings.voice}. Style: ${settings.style}.`,
+      canRunInChat: true,
+      language,
+      voice: settings.voice,
+      style: settings.style
+    });
+  }
+
+  async function runFreeChat(message: string, history: Array<{ role: 'user' | 'assistant'; content: string }> = []) {
+    const assistantId = makeId();
+    setRunningActionId(assistantId);
+    setMessages((current) => [
+      ...current,
+      {
+        id: assistantId,
+        role: 'assistant' as const,
+        content: 'Thinking...',
+        createdAt: Date.now(),
+        status: 'running' as const
+      }
+    ].slice(-MAX_MEMORY_MESSAGES));
+
+    try {
+      const response = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, mode: 'Ask AI', history })
+      });
+      const data = (await response.json().catch(() => ({}))) as { response?: string; error?: string };
+      if (!response.ok || !data.response) throw new Error(data.error || 'SAVI could not answer.');
+
+      setMessages((current) =>
+        updateMessage(current, assistantId, {
+          status: 'idle',
+          content: data.response,
+          result: undefined
+        })
+      );
+    } catch (error) {
+      setMessages((current) =>
+        updateMessage(current, assistantId, {
+          status: 'error',
+          content: error instanceof Error ? error.message : 'SAVI could not answer.'
+        })
+      );
+    } finally {
+      setRunningActionId(null);
+    }
+  }
+
+  function getActionAttachments(action: PendingAction) {
+    const stored = actionAttachmentStoreRef.current[action.id];
+    if (stored?.length) return stored;
+    if (action.attachments?.length) return action.attachments;
+    if (!action.attachmentIds?.length) return [];
+    return action.attachmentIds
+      .map((id) => attachments.find((item) => item.id === id))
+      .filter((item): item is ChatAttachment => Boolean(item));
+  }
+
+  async function executeAction(messageId: string, action: PendingAction) {
+    if (runningActionId) return;
+
+    if (!action.canRunInChat) {
+      onOpenTool(action.mode);
+      setMessages((current) =>
+        updateMessage(current, messageId, {
+          pendingAction: undefined,
+          content: `${action.title} is open in its own tab. Uploads, settings, preview, and outputs stay there.`
+        })
+      );
+      return;
+    }
+
+    if (credits < action.cost) {
+      setMessages((current) =>
+        updateMessage(current, messageId, {
+          pendingAction: undefined,
+          status: 'error',
+          content: `You need ${action.cost} credits for ${action.title}, but you only have ${credits}. Add credits to continue.`
+        })
+      );
+      return;
+    }
+
+    if (isAuthLoading) return;
+    if (!user) {
+      signIn();
+      return;
+    }
+
+    setRunningActionId(action.id);
+    setMessages((current) =>
+      updateMessage(current, messageId, {
+        pendingAction: undefined,
+        status: 'running',
+        content: `Creating ${action.title}...`
+      })
+    );
+
+    try {
+      let result: ChatResult;
+      const actionAttachments = getActionAttachments(action);
+
+      if (action.tool === 'file_studio' && action.toolId) {
+        const pdfAttachments = actionAttachments.filter((item) => item.kind === 'pdf');
+        const pdf = pdfAttachments[0];
+        if (!pdf) throw new Error('Upload a PDF first.');
+
+        if (['merge_pdf', 'pdf_to_jpg', 'extract_images'].includes(action.toolId)) {
+          const formData = new FormData();
+          formData.append('action', action.toolId);
+          pdfAttachments.forEach((item) => formData.append('files', item.file));
+          if (action.toolId === 'pdf_to_jpg') formData.append('pages', 'all');
+          const response = await fetch('/api/file-tools/process', { method: 'POST', body: formData });
+          if (!response.ok) {
+            const data = (await response.json().catch(() => ({}))) as { error?: string };
+            throw new Error(data.error || 'PDF processing failed.');
+          }
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const fileNames: Record<string, string> = {
+            merge_pdf: 'savi-merged.pdf',
+            pdf_to_jpg: `${pdf.name.replace(/\.pdf$/i, '')}-jpg-pages.zip`,
+            extract_images: `${pdf.name.replace(/\.pdf$/i, '')}-images.zip`
+          };
+          result = {
+            type: 'file',
+            url,
+            filename: fileNames[action.toolId] || 'savi-file-output.zip',
+            helper: localizedText(action.language || userLanguage(action.prompt), 'فایل آماده دانلود است.', 'Your file is ready to download.')
+          };
+        } else if (action.toolId === 'organize_pdf') {
+          const swapPages = action.swapPages || parseSwapPages(action.prompt);
+          if (!swapPages) {
+            throw new Error(localizedText(action.language || userLanguage(action.prompt), 'بگو دقیقاً کدام صفحه‌ها باید جابه‌جا شوند.', 'Tell me exactly which pages should be moved or swapped.'));
+          }
+
+          const formData = new FormData();
+          formData.append('action', 'organize_pdf');
+          formData.append('files', pdf.file);
+          formData.append('swapPages', JSON.stringify(swapPages));
+          const response = await fetch('/api/file-tools/process', {
+            method: 'POST',
+            body: formData
+          });
+          if (!response.ok) {
+            const data = (await response.json().catch(() => ({}))) as { error?: string };
+            throw new Error(data.error || 'PDF organization failed.');
+          }
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          result = {
+            type: 'file',
+            url,
+            filename: `${pdf.name.replace(/\.pdf$/i, '')}-organized.pdf`,
+            helper: localizedText(
+              action.language || userLanguage(action.prompt),
+              action.followUpVoice ? 'PDF مرتب‌شده آماده است. حالا اگر تایید کنی، می‌توانم متن همین PDF را به پادکست رادیویی یا TTS تبدیل کنم.' : 'PDF مرتب‌شده آماده است.',
+              action.followUpVoice ? 'Organized PDF ready. If you confirm next, I can turn this PDF into radio audio or TTS.' : 'Organized PDF ready.'
+            )
+          };
+        } else {
+          const formData = new FormData();
+          formData.append('file', pdf.file);
+          formData.append('toolId', action.toolId);
+          formData.append('prompt', action.prompt);
+          const response = await fetch('/api/file-tools/ai', {
+            method: 'POST',
+            body: formData
+          });
+          const data = (await response.json().catch(() => ({}))) as { result?: string; error?: string };
+          if (!response.ok || !data.result) throw new Error(data.error || 'PDF processing failed.');
+          result = {
+            type: 'text',
+            text: data.result,
+            filename: `savi-${action.toolId}.txt`,
+            helper: localizedText(action.language || userLanguage(action.prompt), 'نتیجه سند آماده است.', 'Document result ready.')
+          };
+        }
+      } else if (action.tool === 'image_studio' && action.toolId) {
+        const imageAttachments = actionAttachments.filter((item) => item.kind === 'image').slice(0, action.toolId === 'mockup' ? 2 : 3);
+        if (!imageAttachments.length) throw new Error('Upload an image first.');
+        const response = await fetch('/api/image/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: action.prompt,
+            toolId: action.toolId,
+            aspectRatio: action.aspectRatio || '1:1',
+            quality: action.quality || '1080',
+            style: 'Premium realistic SAVI edit, preserve original image where requested',
+            referenceImages: imageAttachments.map((item) => ({
+              data: item.base64,
+              mimeType: item.mimeType,
+              name: item.name
+            }))
+          })
+        });
+        const data = (await response.json().catch(() => ({}))) as { image?: string; filename?: string; error?: string };
+        if (!response.ok || !data.image) throw new Error(data.error || 'Image editing failed.');
+        result = {
+          type: 'image',
+          url: data.image,
+          filename: data.filename || 'savi-edited-image.png',
+          helper: 'Image output ready.'
+        };
+      } else if (action.tool === 'video_studio' && action.toolId) {
+        const references = actionAttachments.filter((item) => item.kind === 'image' || item.kind === 'video').slice(0, 3);
+        const response = await fetch('/api/video/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: action.prompt,
+            toolId: action.toolId,
+            ratio: action.aspectRatio === '16:9' ? '16:9' : '9:16',
+            duration: action.duration || '6',
+            quality: action.quality || '720',
+            withAudio: true,
+            references: references.map((item) => ({
+              data: item.base64,
+              mimeType: item.mimeType,
+              name: item.name
+            }))
+          })
+        });
+        const data = (await response.json().catch(() => ({}))) as { video?: string; filename?: string; error?: string };
+        if (!response.ok || !data.video) throw new Error(data.error || 'Video generation failed.');
+        result = {
+          type: 'video',
+          url: data.video,
+          filename: data.filename || 'savi-video.mp4',
+          helper: 'Video ready.'
+        };
+      } else if (action.tool === 'image_text') {
+        const response = await fetch('/api/image/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: action.prompt,
+            toolId: action.agentToolId || 'text_to_image',
+            aspectRatio: action.aspectRatio || '1:1',
+            quality: action.quality || '1080',
+            style: 'Realistic premium SAVI image'
+          })
+        });
+        const data = (await response.json().catch(() => ({}))) as { image?: string; filename?: string; error?: string };
+        if (!response.ok || !data.image) throw new Error(data.error || 'Image generation failed.');
+        result = {
+          type: 'image',
+          url: data.image,
+          filename: data.filename || 'savi-chat-image.png',
+          helper: 'Image ready.'
+        };
+      } else if (action.tool === 'voice_tts') {
+        const response = await fetch('/api/voice/radio', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            script: action.prompt,
+            voice: action.voice || 'Kore',
+            style: action.style || 'natural text to speech, exact wording, warm clear delivery'
+          })
+        });
+        const data = (await response.json().catch(() => ({}))) as { audio?: string; filename?: string; error?: string };
+        if (!response.ok || !data.audio) throw new Error(data.error || 'Voice generation failed.');
+        result = {
+          type: 'audio',
+          text: action.prompt,
+          url: data.audio,
+          filename: data.filename || 'savi-text-to-speech.wav',
+          helper: 'Audio ready.'
+        };
+      } else if (action.tool === 'radio_talk') {
+        const scriptResponse = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: `Turn this into a short, natural SAVI radio podcast script. Do not mention tool settings or duration names. Topic:\n\n${action.prompt}`,
+            mode: 'Voice',
+            templateId: 'radio_talk'
+          })
+        });
+        const scriptData = (await scriptResponse.json().catch(() => ({}))) as { response?: string; error?: string };
+        if (!scriptResponse.ok || !scriptData.response) throw new Error(scriptData.error || 'Radio script failed.');
+
+        const audioResponse = await fetch('/api/voice/radio', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            script: scriptData.response,
+            voice: action.voice || 'Puck',
+            style: action.style || 'warm energetic radio host, natural delivery'
+          })
+        });
+        const audioData = (await audioResponse.json().catch(() => ({}))) as { audio?: string; filename?: string; error?: string };
+        if (!audioResponse.ok || !audioData.audio) throw new Error(audioData.error || 'Radio audio generation failed.');
+        result = {
+          type: 'audio',
+          text: scriptData.response,
+          url: audioData.audio,
+          filename: audioData.filename || 'savi-radio-talk.wav',
+          helper: 'Radio podcast ready.'
+        };
+      } else {
+        const response = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message:
+              action.tool === 'video_script'
+                ? `Create a useful video ad script with hook, scenes, voiceover, captions, and CTA:\n\n${action.prompt}`
+                : action.prompt,
+            mode: action.mode,
+            templateId: action.tool
+          })
+        });
+        const data = (await response.json().catch(() => ({}))) as { response?: string; error?: string };
+        if (!response.ok || !data.response) throw new Error(data.error || 'SAVI could not generate a response.');
+        result = {
+          type: 'text',
+          text: data.response,
+          filename: `savi-${action.tool}.txt`,
+          helper: 'Output ready.'
+        };
+      }
+
+      const completed: Partial<ChatMessage> = {
+        status: 'idle',
+        content: localizedText(action.language || userLanguage(action.prompt), `${action.title} انجام شد. ${result.helper || ''}`, `${action.title} complete. ${result.helper || ''}`),
+        result
+      };
+      recordMediaItem({
+        type: result.type === 'audio' ? 'audio' : result.type === 'image' ? 'image' : result.type === 'video' ? 'video' : result.type === 'file' ? 'pdf' : 'text',
+        title: action.title,
+        source: 'Ask SAVI',
+        url: result.url,
+        filename: result.filename,
+        text: result.text
+      });
+      setMessages((current) => updateMessage(current, messageId, completed));
+      setSavedOutputs((current) => [
+        { id: messageId, role: 'assistant', createdAt: Date.now(), content: completed.content || '', result } as ChatMessage,
+        ...current
+      ].slice(0, 10));
+      onCreditsChange(credits - action.cost);
+
+      if (action.tool === 'file_studio' && action.toolId === 'pdf_podcast' && result.text) {
+        const language = action.language || userLanguage(action.prompt);
+        addPendingAction({
+          id: makeId(),
+          tool: 'radio_talk',
+          title: 'Radio Talk AI',
+          mode: 'Voice',
+          prompt: result.text,
+          cost: 120,
+          reason: localizedText(language, 'اسکریپت پادکست آماده است. می‌توانم آن را با صدای رادیویی بسازم.', 'The podcast script is ready. I can turn it into radio audio.'),
+          intro: localizedText(language, 'اگر صدا هم می‌خواهی، آماده‌ام نسخه‌ی رادیویی را بسازم.', 'If you want audio too, I can create the radio version next.'),
+          canRunInChat: true,
+          language,
+          voice: 'Puck',
+          style: 'warm professional radio host, natural delivery'
+        });
+      }
+    } catch (error) {
+      setMessages((current) =>
+        updateMessage(current, messageId, {
+          status: 'error',
+          content: error instanceof Error ? error.message : 'SAVI could not finish this action.'
+        })
+      );
+    } finally {
+      delete actionAttachmentStoreRef.current[action.id];
+      setRunningActionId(null);
+    }
+  }
+
+  function clearChat() {
+    setMessages([]);
+    setSavedOutputs([]);
+    setToolDraft(undefined);
+    setAttachments([]);
+    setUploadError('');
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(CHAT_STORAGE_KEY);
+      window.localStorage.removeItem(OUTPUT_STORAGE_KEY);
+    }
+  }
+
+  async function handleFiles(files: FileList | null) {
+    const selected = Array.from(files || []);
+    if (!selected.length) return;
+    setUploadError('');
+
+    const availableSlots = Math.max(0, MAX_CHAT_ATTACHMENTS - attachments.length);
+    if (!availableSlots) {
+      setUploadError(`You can attach up to ${MAX_CHAT_ATTACHMENTS} files at once.`);
+      return;
+    }
+
+    const validFiles = selected.slice(0, availableSlots).filter((file) => {
+      const kind = getAttachmentKind(file);
+      return kind !== 'file' && file.size <= MAX_CHAT_ATTACHMENT_SIZE;
+    });
+
+    if (!validFiles.length) {
+      setUploadError('Upload images, PDFs, audio, or video files under 25MB.');
+      return;
+    }
+
+    try {
+      const nextAttachments = await Promise.all(
+        validFiles.map(async (file) => {
+          const kind = getAttachmentKind(file);
+          const base64 = await readFileAsBase64(file);
+          return {
+            id: makeId(),
+            name: file.name,
+            mimeType: file.type || (kind === 'pdf' ? 'application/pdf' : 'application/octet-stream'),
+            size: file.size,
+            kind,
+            file,
+            base64,
+            previewUrl: kind === 'image' || kind === 'video' ? URL.createObjectURL(file) : undefined
+          };
+        })
+      );
+      setAttachments((current) => [...current, ...nextAttachments]);
+      rememberActionAttachments(nextAttachments);
+      continuePendingUploadAction(nextAttachments);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'File upload failed.');
+    }
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((current) => {
+      const item = current.find((attachment) => attachment.id === id);
+      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      return current.filter((attachment) => attachment.id !== id);
+    });
+  }
+
+  return (
+    <section className="relative min-h-[calc(100vh-64px)] overflow-hidden bg-transparent lg:min-h-screen">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/36 to-transparent" />
+
+      <div ref={scrollerRef} className="h-[calc(100vh-64px)] overflow-y-auto px-3 pb-40 pt-14 md:px-8 lg:h-screen lg:pb-44 lg:pt-16">
+        <div className="mx-auto flex min-h-full max-w-6xl flex-col justify-center gap-8">
+          {visibleMessages.map((message) => {
+            const isWelcome = message.id === 'welcome';
+            const isUser = message.role === 'user';
+            const isError = message.status === 'error';
+            const direction = getTextDirection(message.content);
+            const assistantAlign = isWelcome ? 'text-center' : direction === 'rtl' ? 'text-right' : 'text-left';
+            const assistantJustify = isWelcome ? 'justify-center' : direction === 'rtl' ? 'justify-end' : 'justify-start';
+
+            return (
+              <article key={message.id} className={`flex ${isUser ? 'justify-end' : assistantJustify}`}>
+                <div
+                  className={
+                    isUser
+                      ? `max-w-[min(76%,560px)] rounded-[28px] bg-[#1f1f1f] px-5 py-3 text-[15px] leading-7 text-white shadow-[0_16px_45px_rgba(0,0,0,0.18)] ${direction === 'rtl' ? 'text-right' : 'text-left'}`
+                      : isError
+                        ? `w-full max-w-3xl rounded-[24px] border border-red-300/20 bg-red-500/10 px-5 py-4 ${direction === 'rtl' ? 'text-right' : 'text-left'} text-[15px] leading-7 text-red-100`
+                        : `w-full max-w-5xl ${assistantAlign} text-white/82`
+                  }
+                >
+                  <div dir={direction} className={`${isWelcome ? 'text-4xl font-light tracking-tight text-white/88 md:text-6xl' : 'whitespace-pre-wrap text-[15px] leading-8 md:text-[16px]'}`}>
+                    {isWelcome ? welcomeHeadline : message.content}
+                  </div>
+
+                  {message.attachments?.length ? (
+                    <div className={`mt-3 flex flex-wrap gap-2 ${isUser ? 'justify-end' : direction === 'rtl' ? 'justify-end' : 'justify-start'}`}>
+                      {message.attachments.map((attachment) => (
+                        <AttachmentPill key={attachment.id} attachment={attachment} />
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {isWelcome && (
+                    <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-white/48">
+                      Smart Assistant for Valuable Ideas
+                    </p>
+                  )}
+
+                  {message.status === 'running' && (
+                    <div className="mt-4 inline-flex rounded-full bg-white/8 px-3 py-1.5 text-xs font-semibold text-white/58">
+                      SAVI is thinking...
+                    </div>
+                  )}
+
+                  {message.quickReplies && (
+                    <div className="mt-5 flex flex-wrap justify-center gap-2">
+                      {message.quickReplies.map((reply) => (
+                        <button
+                          key={reply}
+                          type="button"
+                          onClick={() => void submitText(reply)}
+                          className="rounded-full border border-white/10 bg-white/8 px-3 py-2 text-xs font-semibold text-white/66 hover:bg-white/14 hover:text-white"
+                        >
+                          {reply}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {!isUser && !isWelcome && !isError && (
+                    <div className={`mt-4 flex items-center gap-1 text-white/42 ${direction === 'rtl' ? 'justify-end' : 'justify-start'}`}>
+                      <button type="button" onClick={() => navigator.clipboard?.writeText(message.content)} className="rounded-full px-2 py-1 text-xs hover:bg-white/8 hover:text-white">Copy</button>
+                    </div>
+                  )}
+
+                  {message.pendingAction && (
+                    <div className="mx-auto mt-5 max-w-xl rounded-[22px] border border-white/10 bg-white/[0.055] p-4 text-left">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{message.pendingAction.title}</p>
+                          <p className="mt-1 text-xs leading-5 text-white/48">{message.pendingAction.reason}</p>
+                        </div>
+                        <span className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-black">
+                          {message.pendingAction.cost} credits
+                        </span>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={Boolean(runningActionId)}
+                          onClick={() => executeAction(message.id, message.pendingAction as PendingAction)}
+                          className="rounded-full bg-white px-4 py-2 text-xs font-bold text-black hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {message.pendingAction.canRunInChat ? 'Confirm' : 'Open tool'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMessages((current) => updateMessage(current, message.id, { pendingAction: undefined, content: 'Cancelled. Tell me the next thing you want to do.' }))}
+                          className="rounded-full border border-white/10 bg-white/8 px-4 py-2 text-xs font-semibold text-white/62 hover:bg-white/14"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {message.result && <ChatResultView result={message.result} />}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="absolute inset-x-0 bottom-0 z-20 px-3 pb-4 md:px-6 md:pb-6">
+        <div className="mx-auto max-w-4xl">
+          {draftTemplate && (
+            <div className="mb-2 inline-flex rounded-full border border-violet-300/20 bg-violet-500/16 px-3 py-1.5 text-[11px] font-semibold text-violet-100">
+              Template ready: {draftTemplate.title}
+            </div>
+          )}
+          {showQuickMenu && (
+            <div className="mb-3 grid gap-2 rounded-[24px] border border-white/10 bg-[#1b1b1b]/90 p-2 shadow-[0_18px_50px_rgba(0,0,0,0.35)] backdrop-blur-2xl sm:grid-cols-4">
+              {[
+                { label: 'Gallery', action: 'media', hint: 'Open library' },
+                { label: 'Image', action: 'image', hint: 'Upload photo' },
+                { label: 'PDF', action: 'pdf', hint: 'Upload document' },
+                { label: 'Video', action: 'video', hint: 'Upload reference' }
+              ].map((item) => (
+                <button
+                  key={item.action}
+                  type="button"
+                  onClick={() => {
+                    setShowQuickMenu(false);
+                    if (item.action === 'media') onOpenTool('All Media');
+                    else fileInputRef.current?.click();
+                  }}
+                  className="rounded-[18px] border border-white/10 bg-white/[0.07] px-3 py-3 text-left hover:bg-white/[0.12]"
+                >
+                  <span className="block text-sm font-semibold text-white">{item.label}</span>
+                  <span className="mt-1 block text-xs text-white/42">{item.hint}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {attachments.length ? (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {attachments.map((attachment) => (
+                <AttachmentPill key={attachment.id} attachment={attachment} onRemove={() => removeAttachment(attachment.id)} />
+              ))}
+            </div>
+          ) : null}
+          {uploadError && (
+            <div className="mb-2 rounded-full border border-red-300/20 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-100">
+              {uploadError}
+            </div>
+          )}
+          <div className="savi-home-input px-4 py-3">
+            <div className="flex items-end gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,application/pdf,video/*,audio/*"
+                className="hidden"
+                onChange={(event) => {
+                  void handleFiles(event.target.files);
+                  event.target.value = '';
+                }}
+              />
+              <button type="button" onClick={() => fileInputRef.current?.click()} onContextMenu={(event) => {
+                event.preventDefault();
+                setShowQuickMenu((current) => !current);
+              }} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-3xl font-light text-white/72 hover:bg-white/8" aria-label="Upload files">
+                +
+              </button>
+              <textarea
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+                rows={1}
+                placeholder="Ask SAVI"
+                className="max-h-32 min-h-10 flex-1 resize-none bg-transparent py-2 text-[16px] leading-6 text-white outline-none placeholder:text-white/42"
+              />
+              <button type="button" onClick={submit} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white text-lg font-black text-black hover:bg-white/85" aria-label="Send">
+                &gt;
+              </button>
+            </div>
+            <div className="mt-1 flex justify-end">
+              <span className="text-[10px] font-medium text-white/28">{input.length}/4000</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ChatResultView({ result }: { result: ChatResult }) {
+  if (result.type === 'text') {
+    return (
+      <div className="mt-3 rounded-[16px] border border-white/10 bg-black/24 p-3">
+        <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap text-[13px] leading-6 text-white/72">{result.text}</pre>
+      </div>
+    );
+  }
+
+  if (result.type === 'image') {
+    return (
+      <div className="mt-3 overflow-hidden rounded-[16px] border border-white/10 bg-black/24 p-2">
+        {result.url && <img src={result.url} alt="SAVI generated image" className="savi-output-media rounded-[14px]" />}
+        {result.url && (
+          <a href={result.url} download={result.filename || 'savi-image.png'} className="mt-2 inline-flex rounded-full bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+            Download image
+          </a>
+        )}
+      </div>
+    );
+  }
+
+  if (result.type === 'audio') {
+    return (
+      <div className="mt-3 rounded-[16px] border border-white/10 bg-black/24 p-3">
+        {result.url && <audio controls src={result.url} className="w-full" />}
+        {result.text && <pre className="mt-3 max-h-[220px] overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-white/56">{result.text}</pre>}
+        <div className="mt-2 flex flex-wrap gap-2">
+          {result.url && (
+            <a href={result.url} download={result.filename || 'savi-audio.wav'} className="rounded-full bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+              Download audio
+            </a>
+          )}
+          {result.text && (
+            <button type="button" onClick={() => downloadText('savi-audio-script.txt', result.text || '')} className="rounded-full border border-white/10 bg-white/8 px-3 py-1.5 text-[11px] font-semibold text-white/62">
+              Download script
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (result.type === 'file') {
+    return (
+      <div className="mt-3 rounded-[16px] border border-white/10 bg-black/24 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-white/82">{result.filename || 'savi-output.pdf'}</p>
+            <p className="mt-1 text-xs text-white/42">{result.helper || 'File ready.'}</p>
+          </div>
+          {result.url && (
+            <a href={result.url} download={result.filename || 'savi-output.pdf'} className="rounded-full bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+              Download PDF
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-[16px] border border-white/10 bg-black/24 p-3">
+      {result.url && <video controls src={result.url} className="savi-output-media rounded-[14px]" />}
+      {result.url && (
+        <a href={result.url} download={result.filename || 'savi-video.mp4'} className="mt-2 inline-flex rounded-full bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+          Download video
+        </a>
+      )}
+    </div>
+  );
+}
+
+function AttachmentPill({
+  attachment,
+  onRemove
+}: {
+  attachment: ChatAttachmentPreview;
+  onRemove?: () => void;
+}) {
+  const label = attachment.kind === 'pdf' ? 'PDF' : attachment.kind === 'image' ? 'Image' : attachment.kind === 'video' ? 'Video' : attachment.kind === 'audio' ? 'Audio' : 'File';
+
+  return (
+    <div className="group flex max-w-[220px] items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.07] p-1.5 text-left shadow-[0_12px_28px_rgba(0,0,0,0.16)]">
+      {attachment.kind === 'image' && attachment.previewUrl ? (
+        <img src={attachment.previewUrl} alt="" className="h-10 w-10 rounded-xl object-cover" />
+      ) : (
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-black/28 text-[10px] font-black uppercase tracking-[0.12em] text-violet-100">
+          {label}
+        </span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-semibold text-white/82">{attachment.name}</span>
+        <span className="block text-[10px] text-white/38">{formatFileSize(attachment.size)}</span>
+      </span>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs text-white/40 transition hover:bg-white/10 hover:text-white"
+          aria-label={`Remove ${attachment.name}`}
+        >
+          x
+        </button>
+      )}
+    </div>
+  );
+}

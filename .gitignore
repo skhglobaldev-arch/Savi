@@ -1,0 +1,19 @@
+.env
+.env.*
+!.env.example
+.DS_Store
+.next/
+node_modules/
+dist/
+out/
+*.log
+*.tsbuildinfo
+tmp/
+dataconnect/.dataconnect/
+
+# Private Google/Firebase credential exports must never enter source control.
+*service-account*.json
+firebase-adminsdk-*.json
+google-credentials*.json
+google-application-credentials*.json
+application_default_credentials.json

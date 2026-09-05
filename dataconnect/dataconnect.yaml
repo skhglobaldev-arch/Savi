@@ -1,0 +1,13 @@
+specVersion: "v1"
+serviceId: "savi-257e0-service"
+location: "europe-west2"
+schemas:
+  - source: "./schema"
+    datasource:
+      postgresql:
+        database: "savi-257e0-database"
+        cloudSql:
+          instanceId: "savi-257e0-instance"
+          # Keep future deploys additive and avoid removing infrastructure outside SAVI.
+          schemaValidation: "COMPATIBLE"
+connectorDirs: ["./savi"]
