@@ -3,6 +3,7 @@
 import { SaviSidebar } from '@/components/SaviSidebar';
 import { useCommerceAccount } from '@/lib/commerce/useCommerceAccount';
 import { useAuthoritativeCredits } from '@/lib/savi/useAuthoritativeCredits';
+import { LegalLinks } from '@/components/LegalLinks';
 
 export default function SettingsPage() {
   const { credits } = useAuthoritativeCredits();
@@ -79,6 +80,7 @@ export default function SettingsPage() {
           ) : null}
           {!isLoading && !state?.recentPurchases.length ? <p className="mt-5 text-white/60">No purchases are recorded for this account.</p> : null}
         </div>
+        <LegalLinks className="mt-12 border-t border-white/10 pt-6" />
       </section>
     </main>
   );

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { getFirestore } from 'firebase-admin/firestore';
 import { NextResponse } from 'next/server';
 import { getSaviAdminApp } from '../firebase/admin';
+import { logOperational } from '../observability/logger';
 
 export type SaviRateLimitClass =
   | 'FREE_AI'
@@ -288,6 +289,7 @@ export function createSaviRateLimiter(store: SaviRateLimitStore = firestoreStore
       const result = await store.consume({ key, policy: input.rateLimitClass, nowMs: Date.now(), config });
       return result.decision;
     } catch {
+      logOperational('error', 'rate_limit_storage_unavailable', { rateLimitClass: input.rateLimitClass, failureMode: config.failureMode });
       return unavailableDecision(config);
     }
   };

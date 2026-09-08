@@ -3,6 +3,7 @@
 import { SaviSidebar } from '@/components/SaviSidebar';
 import { useCommerceAccount } from '@/lib/commerce/useCommerceAccount';
 import { useAuthoritativeCredits } from '@/lib/savi/useAuthoritativeCredits';
+import { LegalLinks } from '@/components/LegalLinks';
 
 export default function CreditsPage() {
   const { credits, isLoading } = useAuthoritativeCredits();
@@ -104,6 +105,7 @@ export default function CreditsPage() {
         {state && state.catalog.productDecisionRequired.stripePriceIds ? (
           <p className="mt-6 text-sm text-slate-500">The approved catalog is ready. Stripe Price IDs still need manual test configuration before checkout can open.</p>
         ) : null}
+        <LegalLinks className="mt-12 border-t border-white/10 pt-6" />
       </section>
     </main>
   );

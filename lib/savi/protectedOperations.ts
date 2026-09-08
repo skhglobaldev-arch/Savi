@@ -16,6 +16,7 @@ import {
   type PrivateAsset,
   type SaviFailureCategory
 } from '@/lib/savi/textToImageInfrastructure';
+import { logOperational } from '@/lib/observability/logger';
 
 const CLIENT_REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const UUID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9a-f]{32})$/i;
@@ -509,6 +510,11 @@ async function release(input: {
       })
     });
   } catch {
+    logOperational('error', 'credit_reservation_release_failed', {
+      toolId: input.toolId,
+      provider: input.provider,
+      failureCategory: input.failure.category
+    });
     throw new SaviInfrastructureError('INTERNAL_ERROR', 500, publicFailureMessage('INTERNAL_ERROR'));
   }
 }
@@ -579,6 +585,11 @@ export async function runProtectedOperation(input: SaviProtectedOperationRequest
     validateOutput(output, input.mediaType);
   } catch (error) {
     const failure = classifyFailure(error);
+    logOperational('warn', 'provider_operation_failed', {
+      toolId: input.toolId,
+      provider: input.provider,
+      failureCategory: failure.category
+    });
     await release({
       userId: databaseUser.id,
       toolId: input.toolId,
@@ -598,6 +609,7 @@ export async function runProtectedOperation(input: SaviProtectedOperationRequest
     storedAsset = await storePrivateAsset(databaseUser.id, output);
   } catch (error) {
     const failure = error instanceof SaviInfrastructureError ? error : new SaviInfrastructureError('STORAGE_FAILURE', 502, publicFailureMessage('STORAGE_FAILURE'));
+    logOperational('error', 'private_asset_storage_failed', { toolId: input.toolId, mediaType: input.mediaType });
     await release({
       userId: databaseUser.id,
       toolId: input.toolId,
@@ -627,6 +639,7 @@ export async function runProtectedOperation(input: SaviProtectedOperationRequest
       pricingOutput: input.pricingOutput
     });
   } catch {
+    logOperational('error', 'credit_finalize_failed', { toolId: input.toolId, provider: input.provider });
     const job = await getJob(databaseUser.id, reserved.jobId).catch(() => null);
     const existingAsset = job?.status === 'completed' ? await getAssetForJob(databaseUser.id, reserved.jobId).catch(() => null) : null;
     if (existingAsset) {

@@ -4,6 +4,7 @@ import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import { renderPdfThumbnails, sanitizeFileName, withTempDir, writeFormFile } from '@/lib/pdf/serverTools';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
+import { logOperational } from '@/lib/observability/logger';
 
 export const runtime = 'nodejs';
 
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
       });
     });
   } catch (error) {
-    console.error('PDF preview failed', error);
+    logOperational('error', 'pdf_preview_failed');
     return NextResponse.json({ error: 'Preview failed. Please try another PDF.' }, { status: 500 });
   }
 }

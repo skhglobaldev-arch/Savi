@@ -10,6 +10,8 @@ import {
 } from '@/lib/auth/session';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
+import { assertSaviProductionConfiguration } from '@/lib/config/saviConfig';
+import { logOperational } from '@/lib/observability/logger';
 
 export const runtime = 'nodejs';
 
@@ -24,10 +26,17 @@ type GoogleTokenInfo = {
 };
 
 function redirectWithStatus(request: NextRequest, status: 'failed' | 'unavailable') {
-  return NextResponse.redirect(new URL(`/?auth=${status}`, request.url));
+  const base = process.env.NODE_ENV === 'production' ? process.env.SAVI_APP_ORIGIN || request.url : request.url;
+  return NextResponse.redirect(new URL(`/?auth=${status}`, base));
 }
 
 export async function GET(request: NextRequest) {
+  try {
+    assertSaviProductionConfiguration('auth');
+  } catch {
+    return redirectWithStatus(request, 'unavailable');
+  }
+
   const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'AUTH', identity: getSaviRequestIdentity(request) });
   if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
@@ -37,10 +46,13 @@ export async function GET(request: NextRequest) {
   const receivedState = request.nextUrl.searchParams.get('state');
   const expectedState = request.cookies.get(SAVI_OAUTH_STATE_COOKIE)?.value;
   const returnTo = safeReturnTo(request.cookies.get(SAVI_OAUTH_RETURN_TO_COOKIE)?.value);
-  if (!code || !receivedState || !expectedState || receivedState !== expectedState) return redirectWithStatus(request, 'failed');
+  if (!code || !receivedState || !expectedState || receivedState !== expectedState) {
+    logOperational('warn', 'google_auth_callback_rejected', { reason: 'invalid_oauth_state' });
+    return redirectWithStatus(request, 'failed');
+  }
 
   try {
-    const origin = new URL(request.url).origin;
+    const origin = new URL(process.env.NODE_ENV === 'production' ? process.env.SAVI_APP_ORIGIN! : request.url).origin;
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -53,7 +65,10 @@ export async function GET(request: NextRequest) {
       })
     });
     const tokenData = (await tokenResponse.json().catch(() => ({}))) as { id_token?: string };
-    if (!tokenResponse.ok || !tokenData.id_token) return redirectWithStatus(request, 'failed');
+    if (!tokenResponse.ok || !tokenData.id_token) {
+      logOperational('warn', 'google_auth_callback_rejected', { reason: 'token_exchange_failed' });
+      return redirectWithStatus(request, 'failed');
+    }
 
     const infoResponse = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenData.id_token)}`);
     const profile = (await infoResponse.json().catch(() => ({}))) as GoogleTokenInfo;
@@ -61,6 +76,7 @@ export async function GET(request: NextRequest) {
     const correctAudience = profile.aud === process.env.GOOGLE_CLIENT_ID;
     const correctIssuer = profile.iss === 'https://accounts.google.com' || profile.iss === 'accounts.google.com';
     if (!infoResponse.ok || !verified || !correctAudience || !correctIssuer || !profile.sub || !profile.email) {
+      logOperational('warn', 'google_auth_callback_rejected', { reason: 'profile_validation_failed' });
       return redirectWithStatus(request, 'failed');
     }
 
@@ -70,7 +86,8 @@ export async function GET(request: NextRequest) {
       name: profile.name?.trim() || profile.email.split('@')[0],
       picture: profile.picture
     };
-    const response = NextResponse.redirect(new URL(returnTo, request.url));
+    const redirectBase = process.env.NODE_ENV === 'production' ? process.env.SAVI_APP_ORIGIN || request.url : request.url;
+    const response = NextResponse.redirect(new URL(returnTo, redirectBase));
     response.cookies.set(SAVI_SESSION_COOKIE, createSessionToken(user), {
       httpOnly: true,
       sameSite: 'lax',
@@ -82,6 +99,7 @@ export async function GET(request: NextRequest) {
     response.cookies.delete(SAVI_OAUTH_RETURN_TO_COOKIE);
     return response;
   } catch {
+    logOperational('error', 'google_auth_callback_failed');
     return redirectWithStatus(request, 'failed');
   }
 }

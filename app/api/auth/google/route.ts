@@ -8,10 +8,17 @@ import {
 } from '@/lib/auth/session';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
+import { assertSaviProductionConfiguration } from '@/lib/config/saviConfig';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
+  try {
+    assertSaviProductionConfiguration('auth');
+  } catch {
+    return NextResponse.redirect(new URL('/?auth=unavailable', request.url));
+  }
+
   const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'AUTH', identity: getSaviRequestIdentity(request) });
   if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
@@ -20,7 +27,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL(`/?auth=unavailable&returnTo=${encodeURIComponent(returnTo)}`, request.url));
   }
 
-  const origin = new URL(request.url).origin;
+  const origin = new URL(process.env.NODE_ENV === 'production' ? process.env.SAVI_APP_ORIGIN! : request.url).origin;
   const state = createOAuthState();
   const googleUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   googleUrl.searchParams.set('client_id', process.env.GOOGLE_CLIENT_ID!);

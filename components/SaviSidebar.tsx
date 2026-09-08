@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
 import type { ToolMode } from './ToolModeSelector';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
+import { LegalConsentNotice, LegalLinks } from './LegalLinks';
 
 export type SidebarMode = ToolMode | 'All Media';
 type SidebarActive = SidebarMode | 'Credits' | 'Settings' | 'Activity';
@@ -289,6 +290,7 @@ export function SaviSidebar({
                     <GoogleIcon />
                     Continue with Google
                   </button>
+                  <LegalConsentNotice className="mt-3 px-2" />
                 </div>
               )}
             </div>
@@ -309,6 +311,8 @@ export function SaviSidebar({
             </span>
           </button>
         </div>
+
+        {!collapsed ? <LegalLinks compact className="mt-3 px-3" /> : null}
       </aside>
 
       <header className="fixed left-0 top-0 z-40 flex h-[62px] w-full items-center gap-2 border-b border-white/[0.08] bg-[#151515]/96 px-3 text-white backdrop-blur-2xl lg:hidden">

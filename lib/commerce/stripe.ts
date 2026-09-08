@@ -1,5 +1,6 @@
 import Stripe from 'stripe';
 import { CommerceCatalogError } from '@/lib/commerce/catalog';
+import { assertSaviProductionConfiguration } from '@/lib/config/saviConfig';
 
 let stripeClient: Stripe | null = null;
 
@@ -12,6 +13,7 @@ function requiredStripeSecret(name: 'STRIPE_SECRET_KEY' | 'STRIPE_WEBHOOK_SECRET
 }
 
 export function getStripeClient() {
+  assertSaviProductionConfiguration('commerce');
   if (stripeClient) return stripeClient;
   stripeClient = new Stripe(requiredStripeSecret('STRIPE_SECRET_KEY'));
   return stripeClient;
