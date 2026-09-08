@@ -17,6 +17,8 @@ type CreditAccount @table(name: "credit_accounts") {
   user: SaviUser! @ref(fields: "userId", references: "id")
   availableCredits: Int! @default(value: 0)
   reservedCredits: Int! @default(value: 0)
+  subscriptionCredits: Int! @default(value: 0)
+  reservedSubscriptionCredits: Int! @default(value: 0)
   createdAt: Timestamp! @default(expr: "request.time")
   updatedAt: Timestamp! @default(expr: "request.time")
 }
@@ -50,6 +52,7 @@ type CreditReservation @table(name: "credit_reservations") {
   jobId: UUID! @unique
   job: GenerationJob! @ref(fields: "jobId", references: "id")
   amount: Int!
+  subscriptionCredits: Int! @default(value: 0)
   status: String!
   createdAt: Timestamp! @default(expr: "request.time")
   finalizedAt: Timestamp
@@ -110,6 +113,114 @@ type AiUsage @table(name: "ai_usage") {
   creditsReserved: Int! @default(value: 0)
   creditsCharged: Int! @default(value: 0)
   creditsReleased: Int! @default(value: 0)
+  metadata: String
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type CommerceCustomer
+  @table(name: "commerce_customers")
+  @unique(fields: ["userId", "provider"])
+  @unique(fields: ["provider", "providerCustomerId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  provider: String!
+  providerCustomerId: String!
+  email: String
+  metadata: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type CommerceSubscription
+  @table(name: "commerce_subscriptions")
+  @unique(fields: ["provider", "providerSubscriptionId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  commerceCustomerId: UUID!
+  commerceCustomer: CommerceCustomer! @ref(fields: "commerceCustomerId", references: "id")
+  provider: String!
+  providerSubscriptionId: String!
+  providerCustomerId: String!
+  planId: String!
+  catalogVersion: String!
+  status: String!
+  providerStatus: String!
+  currentPeriodStart: Timestamp
+  currentPeriodEnd: Timestamp
+  cancelAtPeriodEnd: Boolean! @default(value: false)
+  canceledAt: Timestamp
+  metadata: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type CommercePurchase
+  @table(name: "commerce_purchases")
+  @unique(fields: ["provider", "providerCheckoutSessionId"])
+  @unique(fields: ["provider", "providerPaymentIntentId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  commerceCustomerId: UUID!
+  commerceCustomer: CommerceCustomer! @ref(fields: "commerceCustomerId", references: "id")
+  provider: String!
+  purchaseType: String!
+  catalogItemId: String!
+  catalogVersion: String!
+  status: String!
+  providerCheckoutSessionId: String
+  providerPaymentIntentId: String
+  providerInvoiceId: String
+  currency: String
+  amountTotalMinor: Int
+  creditsGranted: Int! @default(value: 0)
+  metadata: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type PaymentEvent
+  @table(name: "payment_events")
+  @unique(fields: ["provider", "providerEventId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  provider: String!
+  providerEventId: String!
+  eventType: String!
+  livemode: Boolean! @default(value: false)
+  objectId: String
+  userId: UUID
+  user: SaviUser @ref(fields: "userId", references: "id")
+  status: String!
+  errorMessage: String
+  metadata: String
+  createdAt: Timestamp! @default(expr: "request.time")
+  processedAt: Timestamp
+}
+
+type CreditGrant
+  @table(name: "credit_grants")
+  @unique(fields: ["grantKey"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  grantKey: String!
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  purchaseId: UUID
+  purchase: CommercePurchase @ref(fields: "purchaseId", references: "id")
+  subscriptionId: UUID
+  subscription: CommerceSubscription @ref(fields: "subscriptionId", references: "id")
+  provider: String!
+  providerEventId: String!
+  providerInvoiceId: String
+  grantType: String!
+  catalogItemId: String!
+  catalogVersion: String!
+  billingPeriodStart: Timestamp
+  billingPeriodEnd: Timestamp
+  credits: Int!
+  ledgerTransactionId: UUID!
+  status: String!
   metadata: String
   createdAt: Timestamp! @default(expr: "request.time")
 }

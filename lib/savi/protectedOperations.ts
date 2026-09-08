@@ -10,6 +10,7 @@ import {
 } from '@/lib/pricing/saviPricing';
 import {
   getAuthoritativeCreditBalance,
+  getAuthoritativeCreditAccountByUserId,
   resolveSaviDatabaseUser,
   SaviInfrastructureError,
   type PrivateAsset,
@@ -93,6 +94,7 @@ type Reservation = {
   jobId: string;
   reservationId: string;
   credits: number;
+  subscriptionCredits: number;
   pricing: SaviPricingQuote;
 };
 
@@ -336,38 +338,52 @@ async function reserve(input: {
     jobId: randomUUID(),
     reservationId: randomUUID(),
     credits: input.pricing.saviCredits,
+    subscriptionCredits: 0,
     pricing: input.pricing
   };
 
-  try {
-    await dataConnectMutation('ReserveGenerationJob', {
-      jobId: reservation.jobId,
-      reservationId: reservation.reservationId,
-      reservationTransactionId: randomUUID(),
-      reservationEventKey: `reservation:${reservation.reservationId}`,
-      userId: input.userId,
-      toolId: input.toolId,
-      provider: input.provider,
-      model: input.model,
-      clientRequestId: input.clientRequestId,
-      credits: reservation.credits,
-      reservationLedgerAmount: -reservation.credits,
-      reservationReason: `${input.toolId}_reservation`,
-      metadata: metadata(input.metadata)
-    });
-    return reservation;
-  } catch (error) {
-    if (errorText(error).includes('insufficient_credits')) {
-      throw new SaviInfrastructureError('INSUFFICIENT_CREDITS', 402, publicFailureMessage('INSUFFICIENT_CREDITS'));
-    }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const account = await getAuthoritativeCreditAccountByUserId(input.userId);
+    reservation.subscriptionCredits = Math.min(account.subscriptionCredits, reservation.credits);
+
     try {
-      const racedReusable = await resolveExistingJobForTool(input.userId, input.clientRequestId, input.toolId);
-      if (racedReusable) return racedReusable;
-    } catch (raceError) {
-      if (raceError instanceof SaviInfrastructureError) throw raceError;
+      await dataConnectMutation('ReserveGenerationJob', {
+        jobId: reservation.jobId,
+        reservationId: reservation.reservationId,
+        reservationTransactionId: randomUUID(),
+        reservationEventKey: `reservation:${reservation.reservationId}`,
+        userId: input.userId,
+        toolId: input.toolId,
+        provider: input.provider,
+        model: input.model,
+        clientRequestId: input.clientRequestId,
+        credits: reservation.credits,
+        expectedSubscriptionCredits: account.subscriptionCredits,
+        expectedReservedSubscriptionCredits: account.reservedSubscriptionCredits,
+        subscriptionCredits: reservation.subscriptionCredits,
+        reservationLedgerAmount: -reservation.credits,
+        reservationReason: `${input.toolId}_reservation`,
+        metadata: metadata({ ...input.metadata, subscriptionCredits: reservation.subscriptionCredits })
+      });
+      return reservation;
+    } catch (error) {
+      const text = errorText(error);
+      const latestAccount = text.includes('credit_account_state_changed') ? await getAuthoritativeCreditAccountByUserId(input.userId).catch(() => null) : null;
+      if (text.includes('insufficient_credits') || (latestAccount && latestAccount.availableCredits < reservation.credits)) {
+        throw new SaviInfrastructureError('INSUFFICIENT_CREDITS', 402, publicFailureMessage('INSUFFICIENT_CREDITS'));
+      }
+      if (text.includes('credit_account_state_changed') && attempt === 0) continue;
+      try {
+        const racedReusable = await resolveExistingJobForTool(input.userId, input.clientRequestId, input.toolId);
+        if (racedReusable) return racedReusable;
+      } catch (raceError) {
+        if (raceError instanceof SaviInfrastructureError) throw raceError;
+      }
+      throw new SaviInfrastructureError('INTERNAL_ERROR', 500, publicFailureMessage('INTERNAL_ERROR'));
     }
-    throw new SaviInfrastructureError('INTERNAL_ERROR', 500, publicFailureMessage('INTERNAL_ERROR'));
   }
+
+  throw new SaviInfrastructureError('INTERNAL_ERROR', 500, publicFailureMessage('INTERNAL_ERROR'));
 }
 
 async function finalize(input: {
@@ -411,6 +427,7 @@ async function finalize(input: {
     model: input.model,
     mediaType: input.output.mediaType,
     credits: input.reservation.credits,
+    subscriptionCredits: input.reservation.subscriptionCredits,
     chargeLedgerAmount: 0,
     chargeReason: `${input.toolId}_finalized`,
     providerRequestId: input.output.providerRequestId || null,
@@ -469,6 +486,7 @@ async function release(input: {
       provider: input.provider,
       model: input.model,
       credits: input.reservation.credits,
+      subscriptionCredits: input.reservation.subscriptionCredits,
       releaseLedgerAmount: input.reservation.credits,
       releaseReason: `${input.toolId}_reservation_released`,
       failureCategory: input.failure.category,

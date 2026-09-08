@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { type SaviUser } from '@/lib/auth/session';
+import { SAVI_COMMERCE_CATALOG_VERSION, SAVI_FREE_WELCOME_CREDITS } from '@/lib/commerce/catalog';
 import { getSaviDataConnect, getSaviPrivateBucket } from '@/lib/firebase/admin';
 import {
   quoteSaviPrice,
@@ -9,7 +10,6 @@ import {
 } from '@/lib/pricing/saviPricing';
 import type { TextToImageAspectRatio, TextToImageQuality } from '@/lib/pricing/textToImageCatalog';
 
-const DEVELOPMENT_INITIAL_CREDITS = 20_000;
 const CLIENT_REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const UUID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9a-f]{32})$/i;
 const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
@@ -54,7 +54,11 @@ type CreditAccount = {
   userId: string;
   availableCredits: number;
   reservedCredits: number;
+  subscriptionCredits: number;
+  reservedSubscriptionCredits: number;
 };
+
+export type AuthoritativeCreditAccount = CreditAccount;
 
 export type AuthoritativeCreditBalance = {
   availableCredits: number;
@@ -115,6 +119,7 @@ type Reservation = {
   jobId: string;
   reservationId: string;
   credits: number;
+  subscriptionCredits: number;
   pricing: SaviPricingQuote;
 };
 
@@ -157,10 +162,6 @@ export type ProtectedTextToImageRequest = {
   model: string;
   generate: () => Promise<GeneratedImageOutput>;
 };
-
-function isDevelopmentGrantEnabled() {
-  return process.env.NODE_ENV !== 'production' && process.env.SAVI_DEV_CREDIT_GRANT_ENABLED === 'true';
-}
 
 function isTextToImageEnabled() {
   return process.env.SAVI_TEXT_TO_IMAGE_ENABLED !== 'false';
@@ -210,6 +211,11 @@ function errorText(error: unknown) {
   return error instanceof Error ? error.message.toLowerCase() : '';
 }
 
+function isDuplicateWrite(error: unknown) {
+  const text = errorText(error);
+  return text.includes('duplicate') || text.includes('unique') || text.includes('already exists') || text.includes('already_exists') || text.includes('constraint');
+}
+
 function metadata(value: Record<string, unknown>) {
   return JSON.stringify(value);
 }
@@ -245,10 +251,40 @@ async function touchUser(user: SaviUser, databaseUser: DatabaseUser) {
   }
 }
 
+async function findWelcomeGrant(grantKey: string) {
+  const data = await dataConnectQuery<{ creditGrants?: Array<{ id: string; grantKey: string }> }, { grantKey: string }>('FindCreditGrantByGrantKey', {
+    grantKey
+  });
+  return data.creditGrants?.[0] ?? null;
+}
+
+async function ensureWelcomeGrant(databaseUser: DatabaseUser) {
+  const grantKey = `welcome:${databaseUser.id}`;
+  if (await findWelcomeGrant(grantKey)) return;
+
+  try {
+    await dataConnectMutation('GrantWelcomeCredit', {
+      grantId: randomUUID(),
+      transactionId: randomUUID(),
+      grantKey,
+      provider: 'internal',
+      providerEventId: grantKey,
+      userId: databaseUser.id,
+      welcomeCredits: SAVI_FREE_WELCOME_CREDITS,
+      catalogVersion: SAVI_COMMERCE_CATALOG_VERSION,
+      metadata: metadata({ source: 'free_welcome_grant', credits: SAVI_FREE_WELCOME_CREDITS })
+    });
+  } catch (error) {
+    if (isDuplicateWrite(error) && (await findWelcomeGrant(grantKey))) return;
+    throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
+  }
+}
+
 export async function resolveSaviDatabaseUser(user: SaviUser): Promise<DatabaseUser> {
   const existing = await findUserByIdentity(user);
   if (existing) {
     await touchUser(user, existing);
+    await ensureWelcomeGrant(existing);
     return existing;
   }
 
@@ -263,35 +299,29 @@ export async function resolveSaviDatabaseUser(user: SaviUser): Promise<DatabaseU
   };
 
   try {
-    if (isDevelopmentGrantEnabled()) {
-      await dataConnectMutation('CreateSaviUserAndAccountWithDevelopmentGrant', {
-        userId: databaseUser.id,
-        accountId: randomUUID(),
-        transactionId: randomUUID(),
-        eventKey: `development-grant:${databaseUser.id}`,
-        provider: databaseUser.provider,
-        providerSubject: databaseUser.providerSubject,
-        email: databaseUser.email,
-        displayName: databaseUser.displayName,
-        avatarUrl: databaseUser.avatarUrl,
-        developmentCredits: DEVELOPMENT_INITIAL_CREDITS,
-        metadata: metadata({ source: 'development_initial_grant', credits: DEVELOPMENT_INITIAL_CREDITS })
-      });
-    } else {
-      await dataConnectMutation('CreateSaviUserAndAccount', {
-        userId: databaseUser.id,
-        accountId: randomUUID(),
-        provider: databaseUser.provider,
-        providerSubject: databaseUser.providerSubject,
-        email: databaseUser.email,
-        displayName: databaseUser.displayName,
-        avatarUrl: databaseUser.avatarUrl
-      });
-    }
+    await dataConnectMutation('CreateSaviUserAndAccountWithWelcomeGrant', {
+      userId: databaseUser.id,
+      accountId: randomUUID(),
+      grantId: randomUUID(),
+      transactionId: randomUUID(),
+      grantKey: `welcome:${databaseUser.id}`,
+      providerEventId: `welcome:${databaseUser.id}`,
+      provider: databaseUser.provider,
+      providerSubject: databaseUser.providerSubject,
+      email: databaseUser.email,
+      displayName: databaseUser.displayName,
+      avatarUrl: databaseUser.avatarUrl,
+      welcomeCredits: SAVI_FREE_WELCOME_CREDITS,
+      catalogVersion: SAVI_COMMERCE_CATALOG_VERSION,
+      metadata: metadata({ source: 'free_welcome_grant', credits: SAVI_FREE_WELCOME_CREDITS })
+    });
     return databaseUser;
   } catch (error) {
     const racedUser = await findUserByIdentity(user).catch(() => null);
-    if (racedUser) return racedUser;
+    if (racedUser) {
+      await ensureWelcomeGrant(racedUser);
+      return racedUser;
+    }
     throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
   }
 }
@@ -308,13 +338,16 @@ async function getCreditAccount(userId: string) {
 }
 
 export async function getAuthoritativeCreditBalance(user: SaviUser): Promise<AuthoritativeCreditBalance | null> {
-  const databaseUser = await findUserByIdentity(user);
-  if (!databaseUser) return null;
+  const databaseUser = await resolveSaviDatabaseUser(user);
 
   const account = await findCreditAccount(databaseUser.id);
   if (!account) return null;
 
   return { availableCredits: account.availableCredits };
+}
+
+export async function getAuthoritativeCreditAccountByUserId(userId: string) {
+  return getCreditAccount(userId);
 }
 
 async function findGenerationJob(userId: string, clientRequestId: string) {
@@ -390,47 +423,61 @@ async function reserveTextToImageCredits(input: {
     jobId: randomUUID(),
     reservationId: randomUUID(),
     credits: input.pricing.saviCredits,
+    subscriptionCredits: 0,
     pricing: input.pricing
   };
 
-  try {
-    await dataConnectMutation('ReserveTextToImageJob', {
-      jobId: reservation.jobId,
-      reservationId: reservation.reservationId,
-      reservationTransactionId: randomUUID(),
-      reservationEventKey: `reservation:${reservation.reservationId}`,
-      userId: input.userId,
-      toolId: 'text_to_image',
-      provider: input.provider,
-      model: input.model,
-      clientRequestId: input.clientRequestId,
-      credits: reservation.credits,
-      reservationLedgerAmount: -reservation.credits,
-      metadata: metadata({
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const account = await getCreditAccount(input.userId);
+    reservation.subscriptionCredits = Math.min(account.subscriptionCredits, reservation.credits);
+
+    try {
+      await dataConnectMutation('ReserveTextToImageJob', {
+        jobId: reservation.jobId,
+        reservationId: reservation.reservationId,
+        reservationTransactionId: randomUUID(),
+        reservationEventKey: `reservation:${reservation.reservationId}`,
+        userId: input.userId,
         toolId: 'text_to_image',
         provider: input.provider,
         model: input.model,
-        resolution: input.quality,
-        aspectRatio: input.aspectRatio,
-        referenceImageCount: input.referenceImageCount,
-        pricing: serializeSaviPricingMetadata(input.pricing)
-      })
-    });
-    return reservation;
-  } catch (error) {
-    const text = errorText(error);
-    if (text.includes('insufficient_credits')) {
-      throw new SaviInfrastructureError('INSUFFICIENT_CREDITS', 402, errorMessage('INSUFFICIENT_CREDITS'));
-    }
+        clientRequestId: input.clientRequestId,
+        credits: reservation.credits,
+        expectedSubscriptionCredits: account.subscriptionCredits,
+        expectedReservedSubscriptionCredits: account.reservedSubscriptionCredits,
+        subscriptionCredits: reservation.subscriptionCredits,
+        reservationLedgerAmount: -reservation.credits,
+        metadata: metadata({
+          toolId: 'text_to_image',
+          provider: input.provider,
+          model: input.model,
+          resolution: input.quality,
+          aspectRatio: input.aspectRatio,
+          referenceImageCount: input.referenceImageCount,
+          subscriptionCredits: reservation.subscriptionCredits,
+          pricing: serializeSaviPricingMetadata(input.pricing)
+        })
+      });
+      return reservation;
+    } catch (error) {
+      const text = errorText(error);
+      const latestAccount = text.includes('credit_account_state_changed') ? await getCreditAccount(input.userId).catch(() => null) : null;
+      if (text.includes('insufficient_credits') || (latestAccount && latestAccount.availableCredits < reservation.credits)) {
+        throw new SaviInfrastructureError('INSUFFICIENT_CREDITS', 402, errorMessage('INSUFFICIENT_CREDITS'));
+      }
+      if (text.includes('credit_account_state_changed') && attempt === 0) continue;
 
-    try {
-      const racedResult = await existingTextToImageJobResult(input.userId, input.clientRequestId);
-      if (racedResult) return racedResult;
-    } catch (raceError) {
-      if (raceError instanceof SaviInfrastructureError) throw raceError;
+      try {
+        const racedResult = await existingTextToImageJobResult(input.userId, input.clientRequestId);
+        if (racedResult) return racedResult;
+      } catch (raceError) {
+        if (raceError instanceof SaviInfrastructureError) throw raceError;
+      }
+      throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
     }
-    throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
   }
+
+  throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
 }
 
 function parseDataUrl(dataUrl: string) {
@@ -505,6 +552,7 @@ async function finalizeTextToImage(input: {
     usageId: randomUUID(),
     userId: input.userId,
     credits: input.reservation.credits,
+    subscriptionCredits: input.reservation.subscriptionCredits,
     model: input.model,
     chargeLedgerAmount: 0,
     providerRequestId: input.output.providerRequestId || null,
@@ -568,6 +616,7 @@ async function releaseTextToImageReservation(input: {
       usageId: randomUUID(),
       userId: input.userId,
       credits: input.reservation.credits,
+      subscriptionCredits: input.reservation.subscriptionCredits,
       model: input.model,
       releaseLedgerAmount: input.reservation.credits,
       failureCategory: input.failure.category,

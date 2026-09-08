@@ -38,6 +38,8 @@ mutation CreateSaviUserAndAccount(
     userId: $userId
     availableCredits: 0
     reservedCredits: 0
+    subscriptionCredits: 0
+    reservedSubscriptionCredits: 0
     updatedAt_expr: "request.time"
   })
 }
@@ -71,6 +73,8 @@ mutation CreateSaviUserAndAccountWithDevelopmentGrant(
     userId: $userId
     availableCredits: $developmentCredits
     reservedCredits: 0
+    subscriptionCredits: 0
+    reservedSubscriptionCredits: 0
     updatedAt_expr: "request.time"
   })
   creditTransaction_insert(data: {
@@ -80,6 +84,120 @@ mutation CreateSaviUserAndAccountWithDevelopmentGrant(
     type: "credit_grant"
     amount: $developmentCredits
     reason: "development_initial_grant"
+    metadata: $metadata
+  })
+}
+
+mutation CreateSaviUserAndAccountWithWelcomeGrant(
+  $userId: UUID!
+  $accountId: UUID!
+  $grantId: UUID!
+  $transactionId: UUID!
+  $grantKey: String!
+  $providerEventId: String!
+  $provider: String!
+  $providerSubject: String!
+  $email: String!
+  $displayName: String!
+  $avatarUrl: String
+  $welcomeCredits: Int!
+  $catalogVersion: String!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  saviUser_insert(data: {
+    id: $userId
+    provider: $provider
+    providerSubject: $providerSubject
+    email: $email
+    displayName: $displayName
+    avatarUrl: $avatarUrl
+    status: "active"
+    updatedAt_expr: "request.time"
+    lastLoginAt_expr: "request.time"
+  })
+  creditAccount_insert(data: {
+    id: $accountId
+    userId: $userId
+    availableCredits: $welcomeCredits
+    reservedCredits: 0
+    subscriptionCredits: 0
+    reservedSubscriptionCredits: 0
+    updatedAt_expr: "request.time"
+  })
+  creditGrant_insert(data: {
+    id: $grantId
+    grantKey: $grantKey
+    userId: $userId
+    provider: $provider
+    providerEventId: $providerEventId
+    grantType: "welcome_grant"
+    catalogItemId: "free"
+    catalogVersion: $catalogVersion
+    credits: $welcomeCredits
+    ledgerTransactionId: $transactionId
+    status: "granted"
+    metadata: $metadata
+  })
+  creditTransaction_insert(data: {
+    id: $transactionId
+    eventKey: $grantKey
+    userId: $userId
+    type: "credit_grant"
+    amount: $welcomeCredits
+    reason: "welcome_grant"
+    metadata: $metadata
+  })
+}
+
+query FindCreditGrantByGrantKey($grantKey: String!) @auth(level: NO_ACCESS) {
+  creditGrants(where: { grantKey: { eq: $grantKey } }, limit: 1) {
+    id
+    userId
+    grantKey
+    credits
+    status
+  }
+}
+
+mutation GrantWelcomeCredit(
+  $grantId: UUID!
+  $transactionId: UUID!
+  $grantKey: String!
+  $provider: String!
+  $providerEventId: String!
+  $userId: UUID!
+  $welcomeCredits: Int!
+  $catalogVersion: String!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  creditGrant_insert(data: {
+    id: $grantId
+    grantKey: $grantKey
+    userId: $userId
+    provider: $provider
+    providerEventId: $providerEventId
+    grantType: "welcome_grant"
+    catalogItemId: "free"
+    catalogVersion: $catalogVersion
+    credits: $welcomeCredits
+    ledgerTransactionId: $transactionId
+    status: "granted"
+    metadata: $metadata
+  })
+  creditAccount_updateMany(
+    where: { userId: { eq: $userId } }
+    data: {
+      availableCredits_update: { inc: $welcomeCredits }
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_MISSING")
+  creditTransaction_insert(data: {
+    id: $transactionId
+    eventKey: $grantKey
+    userId: $userId
+    type: "credit_grant"
+    amount: $welcomeCredits
+    reason: "welcome_grant"
     metadata: $metadata
   })
 }
@@ -105,6 +223,8 @@ query GetCreditAccount($userId: UUID!) @auth(level: NO_ACCESS) {
     userId
     availableCredits
     reservedCredits
+    subscriptionCredits
+    reservedSubscriptionCredits
   }
 }
 
@@ -199,17 +319,27 @@ mutation ReserveTextToImageJob(
   $model: String!
   $clientRequestId: String!
   $credits: Int!
+  $expectedSubscriptionCredits: Int!
+  $expectedReservedSubscriptionCredits: Int!
+  $subscriptionCredits: Int!
   $reservationLedgerAmount: Int!
   $metadata: String!
 ) @transaction @auth(level: NO_ACCESS) {
   creditAccount_updateMany(
-    where: { userId: { eq: $userId }, availableCredits: { ge: $credits } }
+    where: {
+      userId: { eq: $userId }
+      availableCredits: { ge: $credits }
+      subscriptionCredits: { eq: $expectedSubscriptionCredits }
+      reservedSubscriptionCredits: { eq: $expectedReservedSubscriptionCredits }
+    }
     data: {
       availableCredits_update: { dec: $credits }
       reservedCredits_update: { inc: $credits }
+      subscriptionCredits_update: { dec: $subscriptionCredits }
+      reservedSubscriptionCredits_update: { inc: $subscriptionCredits }
       updatedAt_expr: "request.time"
     }
-  ) @check(expr: "this == 1", message: "INSUFFICIENT_CREDITS")
+  ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_STATE_CHANGED")
   generationJob_insert(data: {
     id: $jobId
     userId: $userId
@@ -228,6 +358,7 @@ mutation ReserveTextToImageJob(
     userId: $userId
     jobId: $jobId
     amount: $credits
+    subscriptionCredits: $subscriptionCredits
     status: "reserved"
   })
   creditTransaction_insert(data: {
@@ -252,6 +383,7 @@ mutation FinalizeTextToImageJob(
   $usageId: UUID!
   $userId: UUID!
   $credits: Int!
+  $subscriptionCredits: Int!
   $model: String!
   $chargeLedgerAmount: Int!
   $providerRequestId: String
@@ -283,8 +415,16 @@ mutation FinalizeTextToImageJob(
     data: { status: "finalized", finalizedAt_expr: "request.time" }
   ) @check(expr: "this == 1", message: "RESERVATION_NOT_ACTIVE")
   creditAccount_updateMany(
-    where: { userId: { eq: $userId }, reservedCredits: { ge: $credits } }
-    data: { reservedCredits_update: { dec: $credits }, updatedAt_expr: "request.time" }
+    where: {
+      userId: { eq: $userId }
+      reservedCredits: { ge: $credits }
+      reservedSubscriptionCredits: { ge: $subscriptionCredits }
+    }
+    data: {
+      reservedCredits_update: { dec: $credits }
+      reservedSubscriptionCredits_update: { dec: $subscriptionCredits }
+      updatedAt_expr: "request.time"
+    }
   ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_MISMATCH")
   generationJob_updateMany(
     where: { id: { eq: $jobId }, userId: { eq: $userId }, status: { eq: "processing" } }
@@ -351,6 +491,7 @@ mutation ReleaseTextToImageReservation(
   $usageId: UUID!
   $userId: UUID!
   $credits: Int!
+  $subscriptionCredits: Int!
   $model: String!
   $releaseLedgerAmount: Int!
   $failureCategory: String!
@@ -378,10 +519,16 @@ mutation ReleaseTextToImageReservation(
     data: { status: "released", releasedAt_expr: "request.time" }
   ) @check(expr: "this == 1", message: "RESERVATION_NOT_ACTIVE")
   creditAccount_updateMany(
-    where: { userId: { eq: $userId }, reservedCredits: { ge: $credits } }
+    where: {
+      userId: { eq: $userId }
+      reservedCredits: { ge: $credits }
+      reservedSubscriptionCredits: { ge: $subscriptionCredits }
+    }
     data: {
       availableCredits_update: { inc: $credits }
       reservedCredits_update: { dec: $credits }
+      subscriptionCredits_update: { inc: $subscriptionCredits }
+      reservedSubscriptionCredits_update: { dec: $subscriptionCredits }
       updatedAt_expr: "request.time"
     }
   ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_MISMATCH")
@@ -445,18 +592,28 @@ mutation ReserveGenerationJob(
   $model: String!
   $clientRequestId: String!
   $credits: Int!
+  $expectedSubscriptionCredits: Int!
+  $expectedReservedSubscriptionCredits: Int!
+  $subscriptionCredits: Int!
   $reservationLedgerAmount: Int!
   $reservationReason: String!
   $metadata: String!
 ) @transaction @auth(level: NO_ACCESS) {
   creditAccount_updateMany(
-    where: { userId: { eq: $userId }, availableCredits: { ge: $credits } }
+    where: {
+      userId: { eq: $userId }
+      availableCredits: { ge: $credits }
+      subscriptionCredits: { eq: $expectedSubscriptionCredits }
+      reservedSubscriptionCredits: { eq: $expectedReservedSubscriptionCredits }
+    }
     data: {
       availableCredits_update: { dec: $credits }
       reservedCredits_update: { inc: $credits }
+      subscriptionCredits_update: { dec: $subscriptionCredits }
+      reservedSubscriptionCredits_update: { inc: $subscriptionCredits }
       updatedAt_expr: "request.time"
     }
-  ) @check(expr: "this == 1", message: "INSUFFICIENT_CREDITS")
+  ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_STATE_CHANGED")
   generationJob_insert(data: {
     id: $jobId
     userId: $userId
@@ -475,6 +632,7 @@ mutation ReserveGenerationJob(
     userId: $userId
     jobId: $jobId
     amount: $credits
+    subscriptionCredits: $subscriptionCredits
     status: "reserved"
   })
   creditTransaction_insert(data: {
@@ -503,6 +661,7 @@ mutation FinalizeGenerationJob(
   $model: String!
   $mediaType: String!
   $credits: Int!
+  $subscriptionCredits: Int!
   $chargeLedgerAmount: Int!
   $chargeReason: String!
   $providerRequestId: String
@@ -534,8 +693,16 @@ mutation FinalizeGenerationJob(
     data: { status: "finalized", finalizedAt_expr: "request.time" }
   ) @check(expr: "this == 1", message: "RESERVATION_NOT_ACTIVE")
   creditAccount_updateMany(
-    where: { userId: { eq: $userId }, reservedCredits: { ge: $credits } }
-    data: { reservedCredits_update: { dec: $credits }, updatedAt_expr: "request.time" }
+    where: {
+      userId: { eq: $userId }
+      reservedCredits: { ge: $credits }
+      reservedSubscriptionCredits: { ge: $subscriptionCredits }
+    }
+    data: {
+      reservedCredits_update: { dec: $credits }
+      reservedSubscriptionCredits_update: { dec: $subscriptionCredits }
+      updatedAt_expr: "request.time"
+    }
   ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_MISMATCH")
   generationJob_updateMany(
     where: { id: { eq: $jobId }, userId: { eq: $userId }, status: { eq: "processing" } }
@@ -605,6 +772,7 @@ mutation ReleaseGenerationReservation(
   $provider: String!
   $model: String!
   $credits: Int!
+  $subscriptionCredits: Int!
   $releaseLedgerAmount: Int!
   $releaseReason: String!
   $failureCategory: String!
@@ -632,10 +800,16 @@ mutation ReleaseGenerationReservation(
     data: { status: "released", releasedAt_expr: "request.time" }
   ) @check(expr: "this == 1", message: "RESERVATION_NOT_ACTIVE")
   creditAccount_updateMany(
-    where: { userId: { eq: $userId }, reservedCredits: { ge: $credits } }
+    where: {
+      userId: { eq: $userId }
+      reservedCredits: { ge: $credits }
+      reservedSubscriptionCredits: { ge: $subscriptionCredits }
+    }
     data: {
       availableCredits_update: { inc: $credits }
       reservedCredits_update: { dec: $credits }
+      subscriptionCredits_update: { inc: $subscriptionCredits }
+      reservedSubscriptionCredits_update: { dec: $subscriptionCredits }
       updatedAt_expr: "request.time"
     }
   ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_MISMATCH")
@@ -736,6 +910,471 @@ mutation RecordFreeAiUsage(
     creditsReserved: 0
     creditsCharged: 0
     creditsReleased: 0
+    metadata: $metadata
+  })
+}
+
+# Provider-neutral commerce operations. Stripe is the first provider, but these
+# records and credit grants are intentionally not Stripe-specific so future
+# Apple StoreKit verification can grant credits through the same ledger/account.
+
+query FindCommerceCustomer($userId: UUID!, $provider: String!) @auth(level: NO_ACCESS) {
+  commerceCustomers(where: { userId: { eq: $userId }, provider: { eq: $provider } }, limit: 1) {
+    id
+    userId
+    provider
+    providerCustomerId
+    email
+    metadata
+    createdAt
+    updatedAt
+  }
+}
+
+query FindCommerceCustomerByProviderId($provider: String!, $providerCustomerId: String!) @auth(level: NO_ACCESS) {
+  commerceCustomers(where: { provider: { eq: $provider }, providerCustomerId: { eq: $providerCustomerId } }, limit: 1) {
+    id
+    userId
+    provider
+    providerCustomerId
+    email
+    metadata
+    createdAt
+    updatedAt
+  }
+}
+
+mutation CreateCommerceCustomer(
+  $id: UUID!
+  $userId: UUID!
+  $provider: String!
+  $providerCustomerId: String!
+  $email: String
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  commerceCustomer_insert(data: {
+    id: $id
+    userId: $userId
+    provider: $provider
+    providerCustomerId: $providerCustomerId
+    email: $email
+    metadata: $metadata
+    updatedAt_expr: "request.time"
+  })
+}
+
+query GetCommerceBillingState($userId: UUID!) @auth(level: NO_ACCESS) {
+  commerceCustomers(where: { userId: { eq: $userId } }, limit: 10) {
+    id
+    provider
+    providerCustomerId
+    email
+    createdAt
+    updatedAt
+  }
+  commerceSubscriptions(where: { userId: { eq: $userId } }, limit: 10) {
+    id
+    provider
+    providerSubscriptionId
+    providerCustomerId
+    planId
+    catalogVersion
+    status
+    providerStatus
+    currentPeriodStart
+    currentPeriodEnd
+    cancelAtPeriodEnd
+    canceledAt
+    createdAt
+    updatedAt
+  }
+  commercePurchases(where: { userId: { eq: $userId } }, limit: 25) {
+    id
+    provider
+    purchaseType
+    catalogItemId
+    catalogVersion
+    status
+    providerCheckoutSessionId
+    providerPaymentIntentId
+    providerInvoiceId
+    currency
+    amountTotalMinor
+    creditsGranted
+    createdAt
+    updatedAt
+  }
+  creditGrants(where: { userId: { eq: $userId } }, limit: 25) {
+    id
+    grantKey
+    provider
+    providerEventId
+    providerInvoiceId
+    grantType
+    catalogItemId
+    catalogVersion
+    billingPeriodStart
+    billingPeriodEnd
+    credits
+    status
+    createdAt
+  }
+}
+
+query FindPaymentEvent($provider: String!, $providerEventId: String!) @auth(level: NO_ACCESS) {
+  paymentEvents(where: { provider: { eq: $provider }, providerEventId: { eq: $providerEventId } }, limit: 1) {
+    id
+    provider
+    providerEventId
+    eventType
+    livemode
+    objectId
+    userId
+    status
+    errorMessage
+    createdAt
+    processedAt
+  }
+}
+
+query FindCommerceSubscriptionByProvider($provider: String!, $providerSubscriptionId: String!) @auth(level: NO_ACCESS) {
+  commerceSubscriptions(where: { provider: { eq: $provider }, providerSubscriptionId: { eq: $providerSubscriptionId } }, limit: 1) {
+    id
+    userId
+    commerceCustomerId
+    provider
+    providerSubscriptionId
+    providerCustomerId
+    planId
+    catalogVersion
+    status
+    providerStatus
+    currentPeriodStart
+    currentPeriodEnd
+    cancelAtPeriodEnd
+    canceledAt
+    createdAt
+    updatedAt
+  }
+}
+
+query FindCommercePurchaseByPaymentIntent($provider: String!, $providerPaymentIntentId: String!) @auth(level: NO_ACCESS) {
+  commercePurchases(where: { provider: { eq: $provider }, providerPaymentIntentId: { eq: $providerPaymentIntentId } }, limit: 1) {
+    id
+    userId
+    status
+    providerPaymentIntentId
+    providerCheckoutSessionId
+    catalogItemId
+    catalogVersion
+    creditsGranted
+    metadata
+  }
+}
+
+mutation UpdateCommercePurchaseStatus(
+  $purchaseId: UUID!
+  $userId: UUID!
+  $status: String!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  commercePurchase_updateMany(
+    where: { id: { eq: $purchaseId }, userId: { eq: $userId } }
+    data: {
+      status: $status
+      metadata: $metadata
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "PURCHASE_NOT_FOUND")
+}
+
+mutation RecordPaymentEventOnly(
+  $eventId: UUID!
+  $provider: String!
+  $providerEventId: String!
+  $eventType: String!
+  $livemode: Boolean!
+  $objectId: String
+  $userId: UUID
+  $status: String!
+  $errorMessage: String
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  paymentEvent_insert(data: {
+    id: $eventId
+    provider: $provider
+    providerEventId: $providerEventId
+    eventType: $eventType
+    livemode: $livemode
+    objectId: $objectId
+    userId: $userId
+    status: $status
+    errorMessage: $errorMessage
+    metadata: $metadata
+    processedAt_expr: "request.time"
+  })
+}
+
+mutation FulfillTopUpPurchase(
+  $eventId: UUID!
+  $purchaseId: UUID!
+  $grantId: UUID!
+  $ledgerTransactionId: UUID!
+  $provider: String!
+  $providerEventId: String!
+  $eventType: String!
+  $livemode: Boolean!
+  $objectId: String
+  $userId: UUID!
+  $commerceCustomerId: UUID!
+  $purchaseType: String!
+  $packId: String!
+  $catalogVersion: String!
+  $providerCheckoutSessionId: String
+  $providerPaymentIntentId: String
+  $currency: String
+  $amountTotalMinor: Int
+  $creditsGranted: Int!
+  $grantKey: String!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  paymentEvent_insert(data: {
+    id: $eventId
+    provider: $provider
+    providerEventId: $providerEventId
+    eventType: $eventType
+    livemode: $livemode
+    objectId: $objectId
+    userId: $userId
+    status: "processed"
+    metadata: $metadata
+    processedAt_expr: "request.time"
+  })
+  commercePurchase_insert(data: {
+    id: $purchaseId
+    userId: $userId
+    commerceCustomerId: $commerceCustomerId
+    provider: $provider
+    purchaseType: $purchaseType
+    catalogItemId: $packId
+    catalogVersion: $catalogVersion
+    status: "fulfilled"
+    providerCheckoutSessionId: $providerCheckoutSessionId
+    providerPaymentIntentId: $providerPaymentIntentId
+    currency: $currency
+    amountTotalMinor: $amountTotalMinor
+    creditsGranted: $creditsGranted
+    metadata: $metadata
+    updatedAt_expr: "request.time"
+  })
+  creditGrant_insert(data: {
+    id: $grantId
+    grantKey: $grantKey
+    userId: $userId
+    purchaseId: $purchaseId
+    provider: $provider
+    providerEventId: $providerEventId
+    grantType: "topup_purchase"
+    catalogItemId: $packId
+    catalogVersion: $catalogVersion
+    credits: $creditsGranted
+    ledgerTransactionId: $ledgerTransactionId
+    status: "granted"
+    metadata: $metadata
+  })
+  creditAccount_updateMany(
+    where: { userId: { eq: $userId } }
+    data: {
+      availableCredits_update: { inc: $creditsGranted }
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_MISSING")
+  creditTransaction_insert(data: {
+    id: $ledgerTransactionId
+    eventKey: $grantKey
+    userId: $userId
+    type: "credit_grant"
+    amount: $creditsGranted
+    reason: "topup_purchase"
+    metadata: $metadata
+  })
+}
+
+mutation CreateCommerceSubscriptionFromEvent(
+  $eventId: UUID!
+  $subscriptionId: UUID!
+  $provider: String!
+  $providerEventId: String!
+  $eventType: String!
+  $livemode: Boolean!
+  $objectId: String
+  $userId: UUID!
+  $commerceCustomerId: UUID!
+  $providerSubscriptionId: String!
+  $providerCustomerId: String!
+  $planId: String!
+  $catalogVersion: String!
+  $status: String!
+  $providerStatus: String!
+  $currentPeriodStart: Timestamp
+  $currentPeriodEnd: Timestamp
+  $cancelAtPeriodEnd: Boolean!
+  $canceledAt: Timestamp
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  paymentEvent_insert(data: {
+    id: $eventId
+    provider: $provider
+    providerEventId: $providerEventId
+    eventType: $eventType
+    livemode: $livemode
+    objectId: $objectId
+    userId: $userId
+    status: "processed"
+    metadata: $metadata
+    processedAt_expr: "request.time"
+  })
+  commerceSubscription_insert(data: {
+    id: $subscriptionId
+    userId: $userId
+    commerceCustomerId: $commerceCustomerId
+    provider: $provider
+    providerSubscriptionId: $providerSubscriptionId
+    providerCustomerId: $providerCustomerId
+    planId: $planId
+    catalogVersion: $catalogVersion
+    status: $status
+    providerStatus: $providerStatus
+    currentPeriodStart: $currentPeriodStart
+    currentPeriodEnd: $currentPeriodEnd
+    cancelAtPeriodEnd: $cancelAtPeriodEnd
+    canceledAt: $canceledAt
+    metadata: $metadata
+    updatedAt_expr: "request.time"
+  })
+}
+
+mutation UpdateCommerceSubscriptionFromEvent(
+  $eventId: UUID!
+  $provider: String!
+  $providerEventId: String!
+  $eventType: String!
+  $livemode: Boolean!
+  $objectId: String
+  $userId: UUID!
+  $subscriptionId: UUID!
+  $planId: String!
+  $catalogVersion: String!
+  $status: String!
+  $providerStatus: String!
+  $currentPeriodStart: Timestamp
+  $currentPeriodEnd: Timestamp
+  $cancelAtPeriodEnd: Boolean!
+  $canceledAt: Timestamp
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  paymentEvent_insert(data: {
+    id: $eventId
+    provider: $provider
+    providerEventId: $providerEventId
+    eventType: $eventType
+    livemode: $livemode
+    objectId: $objectId
+    userId: $userId
+    status: "processed"
+    metadata: $metadata
+    processedAt_expr: "request.time"
+  })
+  commerceSubscription_updateMany(
+    where: { id: { eq: $subscriptionId }, userId: { eq: $userId } }
+    data: {
+      planId: $planId
+      catalogVersion: $catalogVersion
+      status: $status
+      providerStatus: $providerStatus
+      currentPeriodStart: $currentPeriodStart
+      currentPeriodEnd: $currentPeriodEnd
+      cancelAtPeriodEnd: $cancelAtPeriodEnd
+      canceledAt: $canceledAt
+      metadata: $metadata
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "SUBSCRIPTION_NOT_FOUND")
+}
+
+mutation FulfillSubscriptionCreditGrant(
+  $eventId: UUID!
+  $grantId: UUID!
+  $ledgerTransactionId: UUID!
+  $provider: String!
+  $providerEventId: String!
+  $eventType: String!
+  $livemode: Boolean!
+  $objectId: String
+  $userId: UUID!
+  $subscriptionId: UUID!
+  $planId: String!
+  $catalogVersion: String!
+  $providerInvoiceId: String!
+  $creditsGranted: Int!
+  $expectedSubscriptionCredits: Int!
+  $expectedReservedSubscriptionCredits: Int!
+  $grantStatus: String!
+  $ledgerReason: String!
+  $grantKey: String!
+  $billingPeriodStart: Timestamp
+  $billingPeriodEnd: Timestamp
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  paymentEvent_insert(data: {
+    id: $eventId
+    provider: $provider
+    providerEventId: $providerEventId
+    eventType: $eventType
+    livemode: $livemode
+    objectId: $objectId
+    userId: $userId
+    status: "processed"
+    metadata: $metadata
+    processedAt_expr: "request.time"
+  })
+  creditGrant_insert(data: {
+    id: $grantId
+    grantKey: $grantKey
+    userId: $userId
+    subscriptionId: $subscriptionId
+    provider: $provider
+    providerEventId: $providerEventId
+    providerInvoiceId: $providerInvoiceId
+    grantType: "subscription_cycle"
+    catalogItemId: $planId
+    catalogVersion: $catalogVersion
+    billingPeriodStart: $billingPeriodStart
+    billingPeriodEnd: $billingPeriodEnd
+    credits: $creditsGranted
+    ledgerTransactionId: $ledgerTransactionId
+    status: $grantStatus
+    metadata: $metadata
+  })
+  creditAccount_updateMany(
+    where: {
+      userId: { eq: $userId }
+      subscriptionCredits: { eq: $expectedSubscriptionCredits }
+      reservedSubscriptionCredits: { eq: $expectedReservedSubscriptionCredits }
+    }
+    data: {
+      availableCredits_update: { inc: $creditsGranted }
+      subscriptionCredits_update: { inc: $creditsGranted }
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_MISSING")
+  creditTransaction_insert(data: {
+    id: $ledgerTransactionId
+    eventKey: $grantKey
+    userId: $userId
+    type: "credit_grant"
+    amount: $creditsGranted
+    reason: $ledgerReason
     metadata: $metadata
   })
 }

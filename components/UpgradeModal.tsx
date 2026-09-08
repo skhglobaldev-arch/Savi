@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 export function UpgradeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
   return (
@@ -10,7 +12,8 @@ export function UpgradeModal({ open, onClose }: { open: boolean; onClose: () => 
         <p className="mt-4 leading-7 text-white/70">
           SAVI could not start this request because your available balance is too low. No credits were used.
         </p>
-        <div className="mt-6 flex">
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link href="/credits" onClick={onClose} className="rounded-full bg-white px-5 py-3 font-bold text-black">View billing</Link>
           <button onClick={onClose} className="rounded-full bg-white px-5 py-3 font-bold text-black">Close</button>
         </div>
       </div>
