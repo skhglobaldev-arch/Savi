@@ -12,11 +12,11 @@ function safeFilename(filename: string) {
   return filename.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 160) || 'savi-asset';
 }
 
-export async function GET(request: NextRequest, context: { params: { assetId: string } }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ assetId: string }> }) {
   const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
   if (!session) return NextResponse.json({ error: 'Please sign in to view this asset.' }, { status: 401 });
 
-  const assetId = context.params.assetId;
+  const { assetId } = await context.params;
   if (!UUID.test(assetId)) return NextResponse.json({ error: 'Asset not found.' }, { status: 404 });
 
   try {
