@@ -4,6 +4,8 @@ import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import { getConfiguredTextModel, SAVI_AI_PDF_TOOL_IDS, SAVI_TEXT_TO_IMAGE_PROVIDER } from '@/lib/pricing/saviPricing';
 import { runProtectedOperation } from '@/lib/savi/protectedOperations';
 import { SaviInfrastructureError } from '@/lib/savi/textToImageInfrastructure';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 import {
   SAVI_AI_PDF_MAX_FILE_BYTES,
   SAVI_AI_PDF_MAX_PAGES,
@@ -142,6 +144,9 @@ async function generateAiPdfText(input: { toolId: AiPdfToolId; prompt: string; f
 export async function POST(request: NextRequest) {
   const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
   if (!session) return NextResponse.json({ error: 'Please sign in before using this tool.', category: 'AUTH_REQUIRED' }, { status: 401 });
+
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'FILE_PROCESSING', identity: getSaviRequestIdentity(request, session.id) });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   try {
     const form = await request.formData();

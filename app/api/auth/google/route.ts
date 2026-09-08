@@ -6,10 +6,15 @@ import {
   SAVI_OAUTH_RETURN_TO_COOKIE,
   SAVI_OAUTH_STATE_COOKIE
 } from '@/lib/auth/session';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'AUTH', identity: getSaviRequestIdentity(request) });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
+
   const returnTo = safeReturnTo(request.nextUrl.searchParams.get('returnTo'));
   if (!isGoogleAuthConfigured()) {
     return NextResponse.redirect(new URL(`/?auth=unavailable&returnTo=${encodeURIComponent(returnTo)}`, request.url));

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CommerceCatalogError } from '@/lib/commerce/catalog';
 import { CommerceError, createSubscriptionCheckout, getCommerceOrigin, getCommerceSessionUser } from '@/lib/commerce/server';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 
 export const runtime = 'nodejs';
 
@@ -17,6 +19,9 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Please sign in before starting checkout.', category: 'AUTH_REQUIRED' }, { status: 401 });
   }
+
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'COMMERCE', identity: getSaviRequestIdentity(request, user.id) });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   const planId = planIdFromBody(await request.json().catch(() => null));
   if (!planId) {

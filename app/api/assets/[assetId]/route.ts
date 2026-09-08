@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import { getSaviPrivateBucket } from '@/lib/firebase/admin';
 import { getOwnedPrivateAsset, SaviInfrastructureError } from '@/lib/savi/textToImageInfrastructure';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +17,9 @@ function safeFilename(filename: string) {
 export async function GET(request: NextRequest, context: { params: Promise<{ assetId: string }> }) {
   const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
   if (!session) return NextResponse.json({ error: 'Please sign in to view this asset.' }, { status: 401 });
+
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'ASSET_READ', identity: getSaviRequestIdentity(request, session.id) });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   const { assetId } = await context.params;
   if (!UUID.test(assetId)) return NextResponse.json({ error: 'Asset not found.' }, { status: 404 });

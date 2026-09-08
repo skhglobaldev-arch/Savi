@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'node:path';
 import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import { renderPdfThumbnails, sanitizeFileName, withTempDir, writeFormFile } from '@/lib/pdf/serverTools';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 
 export const runtime = 'nodejs';
 
@@ -19,6 +21,9 @@ export async function POST(request: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: 'Please sign in before previewing a PDF.', category: 'AUTH_REQUIRED' }, { status: 401 });
   }
+
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'FILE_PROCESSING', identity: getSaviRequestIdentity(request, session.id) });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   try {
     const form = await request.formData();

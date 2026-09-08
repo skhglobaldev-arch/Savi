@@ -20,6 +20,8 @@ import {
   SaviPricingError
 } from '@/lib/pricing/saviPricing';
 import { SAVI_AI_PDF_MAX_FILE_BYTES, SAVI_AI_PDF_MAX_PAGES } from '@/lib/pdf/limits';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 
 export const runtime = 'nodejs';
 
@@ -136,6 +138,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
   if (!session) return NextResponse.json({ error: 'Please sign in to view a SAVI quote.', category: 'AUTH_REQUIRED' }, { status: 401 });
+
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'FILE_PROCESSING', identity: getSaviRequestIdentity(request, session.id) });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   try {
     const form = await request.formData();

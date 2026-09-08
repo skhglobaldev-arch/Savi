@@ -17,6 +17,8 @@ import {
   type GeneratedImageOutput
 } from '@/lib/savi/textToImageInfrastructure';
 import { runProtectedOperation, type SaviProtectedOutput } from '@/lib/savi/protectedOperations';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 
 export const runtime = 'nodejs';
 
@@ -331,6 +333,9 @@ export async function POST(request: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: 'Please sign in before using this tool.', category: 'AUTH_REQUIRED' }, { status: 401 });
   }
+
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'PAID_GENERATION', identity: getSaviRequestIdentity(request, session.id) });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   const body = (await request.json().catch(() => ({}))) as ImageRequest;
   const isProtectedTextToImage = body.toolId === 'text_to_image';

@@ -11,6 +11,8 @@ import {
 } from '@/lib/pricing/saviPricing';
 import { runProtectedOperation } from '@/lib/savi/protectedOperations';
 import { SaviInfrastructureError } from '@/lib/savi/textToImageInfrastructure';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 import {
   getPdfPageCount,
   parsePageRange,
@@ -228,6 +230,9 @@ async function processPdf(action: PdfAction, files: File[], form: FormData): Pro
 export async function POST(request: NextRequest) {
   const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
   if (!session) return NextResponse.json({ error: 'Please sign in before using this tool.', category: 'AUTH_REQUIRED' }, { status: 401 });
+
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'FILE_PROCESSING', identity: getSaviRequestIdentity(request, session.id) });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   try {
     const form = await request.formData();

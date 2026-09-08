@@ -8,6 +8,8 @@ import {
   SAVI_SESSION_COOKIE,
   type SaviUser
 } from '@/lib/auth/session';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 
 export const runtime = 'nodejs';
 
@@ -26,6 +28,9 @@ function redirectWithStatus(request: NextRequest, status: 'failed' | 'unavailabl
 }
 
 export async function GET(request: NextRequest) {
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'AUTH', identity: getSaviRequestIdentity(request) });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
+
   if (!isGoogleAuthConfigured()) return redirectWithStatus(request, 'unavailable');
 
   const code = request.nextUrl.searchParams.get('code');

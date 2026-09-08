@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import { requestGeminiWithFallback } from '@/lib/ai/geminiResilience';
 import { getConfiguredTextModels } from '@/lib/pricing/saviPricing';
-import { consumeSaviFairUse } from '@/lib/savi/fairUse';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 import { recordFreeAiUsage } from '@/lib/savi/protectedOperations';
 import {
   getSaviAgentTool,
@@ -309,13 +310,8 @@ export async function POST(request: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: 'Please sign in to use SAVI Agent.', category: 'AUTH_REQUIRED' }, { status: 401 });
   }
-  const fairUse = consumeSaviFairUse(session.id);
-  if (!fairUse.allowed) {
-    return NextResponse.json(
-      { error: `SAVI is taking a short breather. Please try again in ${fairUse.retryAfterSeconds} seconds.`, category: 'FAIR_USE_LIMIT' },
-      { status: 429, headers: { 'Retry-After': String(fairUse.retryAfterSeconds) } }
-    );
-  }
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'FREE_AI', identity: getSaviRequestIdentity(request, session.id) });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
   const startedAt = Date.now();
   try {
     const body = (await request.json().catch(() => ({}))) as AgentRequest;

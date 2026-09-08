@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CommerceCatalogError } from '@/lib/commerce/catalog';
 import { CommerceError, createBillingPortalSession, getCommerceOrigin, getCommerceSessionUser } from '@/lib/commerce/server';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 
 export const runtime = 'nodejs';
 
@@ -9,6 +11,9 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Please sign in to manage billing.', category: 'AUTH_REQUIRED' }, { status: 401 });
   }
+
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'COMMERCE', identity: getSaviRequestIdentity(request, user.id) });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   try {
     return NextResponse.json(await createBillingPortalSession(user, getCommerceOrigin(request)));
