@@ -4,9 +4,11 @@ import { SaviSidebar } from '@/components/SaviSidebar';
 import { useCommerceAccount } from '@/lib/commerce/useCommerceAccount';
 import { useAuthoritativeCredits } from '@/lib/savi/useAuthoritativeCredits';
 import { LegalLinks } from '@/components/LegalLinks';
+import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 
 export default function SettingsPage() {
   const { credits } = useAuthoritativeCredits();
+  const { user, signIn } = useSaviAuth();
   const { state, error, isLoading, pendingAction, openBillingPortal } = useCommerceAccount();
 
   return (
@@ -18,10 +20,14 @@ export default function SettingsPage() {
         <div className="glass mt-8 rounded-[34px] p-6">
           <h2 className="text-2xl font-black">Account and generation</h2>
           <div className="mt-5 space-y-4 text-white/65">
-            <p>Your SAVI session is connected to your Google account.</p>
+            <p>{user ? `Signed in as ${user.email}.` : 'Sign in with Google to connect your SAVI workspace.'}</p>
             <p>Credits are held in your protected SAVI account and every paid tool confirms its credit use before it runs.</p>
             <p>Generated images, videos, audio, and documents stay private to your account and appear in All Media.</p>
             <p>Use Ask SAVI to plan a task, then confirm a tool action when you are ready to generate.</p>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4 text-sm">
+              <span className="text-white/52">Available credits</span>
+              <span className="font-bold text-white">{typeof credits === 'number' ? credits.toLocaleString() : 'Sign in to view'}</span>
+            </div>
           </div>
         </div>
         <div className="glass mt-6 rounded-[34px] p-6">
@@ -32,18 +38,19 @@ export default function SettingsPage() {
             </div>
             <button
               type="button"
-              onClick={() => void openBillingPortal()}
-              disabled={isLoading || !state?.billingProfile.exists || pendingAction === 'billing-portal'}
+              onClick={() => user ? void openBillingPortal() : signIn()}
+              disabled={Boolean(user && (isLoading || !state?.billingProfile.exists || pendingAction === 'billing-portal'))}
               className="rounded-full bg-white px-4 py-2 text-sm font-bold text-black disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {pendingAction === 'billing-portal' ? 'Opening...' : 'Manage billing'}
+              {pendingAction === 'billing-portal' ? 'Opening...' : user ? 'Manage billing' : 'Sign in'}
             </button>
           </div>
           {isLoading ? <p className="mt-5 text-white/60">Loading billing state...</p> : null}
+          {!isLoading && !user ? <p className="mt-5 text-white/60">Sign in to view your plan, renewal status, and billing history.</p> : null}
           {!isLoading && error ? <p className="mt-5 text-rose-200">{error}</p> : null}
-          {!isLoading && !error && state?.currentSubscription ? (
+          {!isLoading && user && !error && state?.currentSubscription ? (
             <div className="mt-5 rounded-2xl border border-white/10 p-4 text-white/70">
-              <p className="font-bold text-white">{state.currentSubscription.planId}</p>
+              <p className="font-bold text-white">{state.catalog.plans.find((plan) => plan.id === state.currentSubscription?.planId)?.displayName || state.currentSubscription.planId}</p>
               <p className="mt-1 text-sm">Status: {state.currentSubscription.status}</p>
               {state.currentSubscription.currentPeriodEnd ? (
                 <p className="mt-1 text-sm">Current period ends {new Date(state.currentSubscription.currentPeriodEnd).toLocaleDateString()}</p>
@@ -54,7 +61,7 @@ export default function SettingsPage() {
               ) : null}
             </div>
           ) : null}
-          {!isLoading && !error && !state?.currentSubscription ? (
+          {!isLoading && user && !error && !state?.currentSubscription ? (
             <p className="mt-5 text-white/60">No active subscription is recorded for this account.</p>
           ) : null}
           <p className="mt-5 text-sm leading-6 text-white/50">Subscription credits roll over up to the plan cap. Welcome and top-up credits are not clipped or expired.</p>

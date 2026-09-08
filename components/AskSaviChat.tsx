@@ -2151,9 +2151,26 @@ export function AskSaviChat({
                   ) : null}
 
                   {isWelcome && (
-                    <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-white/48">
-                      Smart Assistant for Valuable Ideas
-                    </p>
+                    <>
+                      <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-white/48">
+                        Smart Assistant for Valuable Ideas
+                      </p>
+                      <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-white/38">
+                        One workspace for conversation, images, video, voice, files, and the work you create along the way.
+                      </p>
+                      <div className="mx-auto mt-5 flex max-w-2xl flex-wrap justify-center gap-2">
+                        {(['Images', 'Video', 'Voice', 'Files', 'All Media'] as SidebarMode[]).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => onOpenTool(mode)}
+                            className="rounded-full border border-white/10 bg-white/[0.055] px-3 py-1.5 text-[11px] font-semibold text-white/55 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+                          >
+                            {mode}
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   )}
 
                   {message.status === 'running' && (

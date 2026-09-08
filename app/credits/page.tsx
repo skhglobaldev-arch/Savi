@@ -4,6 +4,7 @@ import { SaviSidebar } from '@/components/SaviSidebar';
 import { useCommerceAccount } from '@/lib/commerce/useCommerceAccount';
 import { useAuthoritativeCredits } from '@/lib/savi/useAuthoritativeCredits';
 import { LegalLinks } from '@/components/LegalLinks';
+import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 
 export default function CreditsPage() {
   const { credits, isLoading } = useAuthoritativeCredits();
@@ -11,10 +12,13 @@ export default function CreditsPage() {
     state,
     error,
     isLoading: isCommerceLoading,
+    catalog: publicCatalog,
     pendingAction,
     startSubscriptionCheckout,
     startTopUpCheckout
   } = useCommerceAccount();
+  const { user, signIn } = useSaviAuth();
+  const catalog = state?.catalog ?? publicCatalog;
 
   return (
     <main className="savi-app-home min-h-screen bg-black text-white">
@@ -31,6 +35,7 @@ export default function CreditsPage() {
             {isLoading ? 'Loading...' : credits === null ? 'Sign in to view' : credits.toLocaleString()}
           </p>
           <p className="mt-5 text-sm leading-6 text-slate-600">Credits are added only after a verified Stripe payment event is processed.</p>
+          <p className="mt-3 text-xs leading-5 text-white/42">Plan credits roll over up to 2× the monthly allocation. Top-up credits do not expire. Ask SAVI is free subject to fair use.</p>
         </div>
 
         <section className="mt-10 grid gap-6 lg:grid-cols-2">
@@ -40,11 +45,11 @@ export default function CreditsPage() {
             <p className="mt-3 text-sm leading-6 text-slate-600">Choose a plan for recurring credits. Creator is recommended for regular creative work.</p>
             <div className="mt-6 space-y-3">
               {isCommerceLoading ? <p className="text-sm text-slate-500">Loading plans...</p> : null}
-              {!isCommerceLoading && !state ? <p className="text-sm text-rose-600">{error || 'Sign in to view subscription plans.'}</p> : null}
-              {!isCommerceLoading && state && !state.catalog.plans.length ? (
-                <p className="text-sm text-slate-500">Product decision required before plans can be offered.</p>
+              {!isCommerceLoading && !catalog && <p className="text-sm text-rose-200">{error || 'Pricing is unavailable right now.'}</p>}
+              {!isCommerceLoading && catalog && !catalog.plans.length ? (
+                <p className="text-sm text-white/58">Plans are not available yet.</p>
               ) : null}
-              {state?.catalog.plans.map((plan) => (
+              {catalog?.plans.map((plan) => (
                 <div key={plan.id} className={`rounded-2xl border p-4 ${plan.recommended ? 'border-violet-500/60 bg-violet-50' : 'border-black/10'}`}>
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
@@ -59,11 +64,11 @@ export default function CreditsPage() {
                     </div>
                     <button
                       type="button"
-                      disabled={!plan.checkoutAvailable || pendingAction === `plan:${plan.id}`}
-                      onClick={() => void startSubscriptionCheckout(plan.id)}
+                      disabled={plan.id === 'free' || Boolean(user && (!plan.checkoutAvailable || pendingAction === `plan:${plan.id}`))}
+                      onClick={() => { if (plan.id !== 'free') { if (user) void startSubscriptionCheckout(plan.id); else signIn(); } }}
                       className="shrink-0 rounded-full bg-black px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {pendingAction === `plan:${plan.id}` ? 'Opening...' : plan.id === 'free' ? 'Included' : plan.checkoutAvailable ? 'Choose plan' : 'Stripe setup pending'}
+                      {pendingAction === `plan:${plan.id}` ? 'Opening...' : plan.id === 'free' ? 'Included' : !user ? 'Sign in to choose' : plan.checkoutAvailable ? 'Choose plan' : 'Billing is not available yet'}
                     </button>
                   </div>
                 </div>
@@ -77,10 +82,10 @@ export default function CreditsPage() {
             <p className="mt-3 text-sm leading-6 text-slate-600">One-time packs are fulfilled by the verified Stripe webhook after payment.</p>
             <div className="mt-6 space-y-3">
               {isCommerceLoading ? <p className="text-sm text-slate-500">Loading top-ups...</p> : null}
-              {!isCommerceLoading && state && !state.catalog.topUpPacks.length ? (
-                <p className="text-sm text-slate-500">Product decision required before top-ups can be offered.</p>
+              {!isCommerceLoading && catalog && !catalog.topUpPacks.length ? (
+                <p className="text-sm text-white/58">Top-ups are not available yet.</p>
               ) : null}
-              {state?.catalog.topUpPacks.map((pack) => (
+              {catalog?.topUpPacks.map((pack) => (
                 <div key={pack.id} className="rounded-2xl border border-black/10 p-4">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
@@ -89,11 +94,11 @@ export default function CreditsPage() {
                     </div>
                     <button
                       type="button"
-                      disabled={!pack.checkoutAvailable || pendingAction === `pack:${pack.id}`}
-                      onClick={() => void startTopUpCheckout(pack.id)}
+                      disabled={Boolean(user && (!pack.checkoutAvailable || pendingAction === `pack:${pack.id}`))}
+                      onClick={() => user ? void startTopUpCheckout(pack.id) : signIn()}
                       className="shrink-0 rounded-full bg-black px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {pendingAction === `pack:${pack.id}` ? 'Opening...' : pack.checkoutAvailable ? 'Add credits' : 'Stripe setup pending'}
+                      {pendingAction === `pack:${pack.id}` ? 'Opening...' : !user ? 'Sign in to add' : pack.checkoutAvailable ? 'Add credits' : 'Billing is not available yet'}
                     </button>
                   </div>
                 </div>
@@ -102,8 +107,8 @@ export default function CreditsPage() {
           </div>
         </section>
 
-        {state && state.catalog.productDecisionRequired.stripePriceIds ? (
-          <p className="mt-6 text-sm text-slate-500">The approved catalog is ready. Stripe Price IDs still need manual test configuration before checkout can open.</p>
+        {catalog?.productDecisionRequired.stripePriceIds ? (
+          <p className="mt-6 text-sm text-white/48">Plans and top-ups are shown for reference. Billing is not available yet.</p>
         ) : null}
         <LegalLinks className="mt-12 border-t border-white/10 pt-6" />
       </section>

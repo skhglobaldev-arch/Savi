@@ -36,6 +36,11 @@ button, input, textarea, select {
   letter-spacing: 0 !important;
 }
 
+:focus-visible {
+  outline: 2px solid rgba(196, 181, 253, 0.95);
+  outline-offset: 3px;
+}
+
 .glass {
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(10, 10, 14, 0.72));

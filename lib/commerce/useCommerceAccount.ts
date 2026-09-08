@@ -63,6 +63,8 @@ export type CommerceAccountState = {
   recentCreditGrants: Array<Record<string, unknown>>;
 };
 
+export type CommerceCatalogState = CommerceAccountState['catalog'];
+
 type CheckoutKind = 'subscription' | 'topup';
 
 async function checkout(kind: CheckoutKind, id: string) {
@@ -82,14 +84,28 @@ async function checkout(kind: CheckoutKind, id: string) {
 export function useCommerceAccount() {
   const { user, isLoading: isAuthLoading } = useSaviAuth();
   const [state, setState] = useState<CommerceAccountState | null>(null);
+  const [catalog, setCatalog] = useState<CommerceCatalogState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    let catalogResponse: Response | null = null;
+    try {
+      catalogResponse = await fetch('/api/commerce/catalog', { cache: 'no-store' });
+      const catalogData = (await catalogResponse.json().catch(() => ({}))) as Partial<CommerceCatalogState>;
+      if (catalogResponse.ok && Array.isArray(catalogData.plans) && Array.isArray(catalogData.topUpPacks)) {
+        setCatalog(catalogData as CommerceCatalogState);
+      } else {
+        setCatalog(null);
+      }
+    } catch {
+      setCatalog(null);
+    }
+
     if (!user) {
       setState(null);
-      setError(null);
+      setError(catalogResponse?.ok === false ? 'Pricing is unavailable right now.' : null);
       setIsLoading(false);
       return null;
     }
@@ -103,6 +119,7 @@ export function useCommerceAccount() {
       const data = (await response.json().catch(() => ({}))) as CommerceAccountState & { error?: unknown };
       if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Billing is unavailable.');
       setState(data);
+      setCatalog(data.catalog);
       setError(null);
       return data;
     } catch (caught) {
@@ -162,6 +179,7 @@ export function useCommerceAccount() {
 
   return {
     state,
+    catalog: state?.catalog ?? catalog,
     error,
     isLoading: isAuthLoading || isLoading,
     pendingAction,
