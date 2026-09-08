@@ -17,9 +17,8 @@ export async function POST(request: NextRequest) {
   try {
     event = constructStripeWebhookEvent(await request.text(), request.headers.get('stripe-signature'));
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Stripe webhook verification failed.';
     const status = error instanceof CommerceCatalogError ? error.status : 400;
-    return NextResponse.json({ error: message, category: 'STRIPE_WEBHOOK_VERIFICATION_FAILED' }, { status });
+    return NextResponse.json({ error: 'Stripe webhook verification failed.', category: 'STRIPE_WEBHOOK_VERIFICATION_FAILED' }, { status });
   }
 
   try {

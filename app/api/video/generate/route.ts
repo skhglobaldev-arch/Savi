@@ -285,8 +285,11 @@ export async function POST(request: NextRequest) {
     if (error instanceof SaviInfrastructureError) {
       return NextResponse.json({ error: error.message, category: error.category }, { status: error.status });
     }
-    if (error instanceof VideoInputError || error instanceof VideoProviderError) {
-      return NextResponse.json({ error: error.message, category: error instanceof VideoInputError ? 'INVALID_INPUT' : 'PROVIDER_ERROR' }, { status: error.status });
+    if (error instanceof VideoInputError) {
+      return NextResponse.json({ error: error.message, category: 'INVALID_INPUT' }, { status: error.status });
+    }
+    if (error instanceof VideoProviderError) {
+      return NextResponse.json({ error: 'Video generation is temporarily unavailable. Please try again.', category: 'PROVIDER_ERROR' }, { status: error.status });
     }
     return NextResponse.json({ error: 'SAVI could not complete this video request. Please try again.', category: 'INTERNAL_ERROR' }, { status: 500 });
   }

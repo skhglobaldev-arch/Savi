@@ -3,6 +3,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 export const SAVI_SESSION_COOKIE = 'savi_session';
 export const SAVI_OAUTH_STATE_COOKIE = 'savi_google_oauth_state';
 export const SAVI_OAUTH_RETURN_TO_COOKIE = 'savi_google_return_to';
+const MIN_AUTH_SECRET_LENGTH = 32;
 
 export type SaviUser = {
   id: string;
@@ -29,7 +30,7 @@ function sign(value: string) {
 }
 
 export function isGoogleAuthConfigured() {
-  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && secret());
+  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && secret().length >= MIN_AUTH_SECRET_LENGTH);
 }
 
 export function createOAuthState() {
@@ -37,12 +38,18 @@ export function createOAuthState() {
 }
 
 export function safeReturnTo(value: string | undefined | null) {
-  if (!value || !value.startsWith('/') || value.startsWith('//')) return '/';
-  return value;
+  if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/';
+
+  try {
+    const parsed = new URL(value, 'https://savi.invalid');
+    return parsed.origin === 'https://savi.invalid' ? value : '/';
+  } catch {
+    return '/';
+  }
 }
 
 export function createSessionToken(user: Omit<SaviUser, 'planId'>) {
-  if (!secret()) throw new Error('Authentication is not configured.');
+  if (secret().length < MIN_AUTH_SECRET_LENGTH) throw new Error('Authentication is not configured.');
   const payload: SaviSessionPayload = {
     ...user,
     planId: 'free',
@@ -53,7 +60,7 @@ export function createSessionToken(user: Omit<SaviUser, 'planId'>) {
 }
 
 export function readSessionToken(token: string | undefined): SaviUser | null {
-  if (!token || !secret()) return null;
+  if (!token || secret().length < MIN_AUTH_SECRET_LENGTH) return null;
   const [encoded, signature] = token.split('.');
   if (!encoded || !signature) return null;
 

@@ -424,8 +424,11 @@ export async function POST(request: NextRequest) {
     if (error instanceof SaviInfrastructureError) {
       return NextResponse.json({ error: error.message, category: error.category }, { status: error.status });
     }
-    if (error instanceof ImageInputError || error instanceof ImageGenerationProviderError) {
+    if (error instanceof ImageInputError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof ImageGenerationProviderError) {
+      return NextResponse.json({ error: 'Image generation is temporarily unavailable. Please try again.', category: 'PROVIDER_ERROR' }, { status: error.status });
     }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Image generation failed.' },

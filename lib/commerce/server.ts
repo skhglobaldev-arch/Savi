@@ -171,12 +171,16 @@ export function getCommerceOrigin(request: NextRequest) {
   if (configuredOrigin) {
     try {
       const parsed = new URL(configuredOrigin);
-      if ((parsed.protocol === 'https:' || parsed.protocol === 'http:') && !parsed.search && !parsed.hash) {
+      const protocolAllowed = parsed.protocol === 'https:' || (process.env.NODE_ENV !== 'production' && parsed.protocol === 'http:');
+      if (protocolAllowed && !parsed.search && !parsed.hash) {
         return parsed.origin;
       }
     } catch {
       throw new CommerceError('INVALID_APP_ORIGIN', 503, 'SAVI_APP_ORIGIN is not a valid application origin.');
     }
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new CommerceError('INVALID_APP_ORIGIN', 503, 'SAVI_APP_ORIGIN must be configured in production.');
   }
   return request.nextUrl.origin;
 }
