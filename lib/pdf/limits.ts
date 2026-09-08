@@ -1,0 +1,3 @@
+export const SAVI_AI_PDF_MAX_FILE_BYTES = 25 * 1024 * 1024;
+export const SAVI_AI_PDF_MAX_PAGES = 80;
+export const SAVI_AI_PDF_MAX_PROMPT_LENGTH = 3_000;

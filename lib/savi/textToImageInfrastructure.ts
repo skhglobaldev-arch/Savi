@@ -1,12 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { getSaviTextToImageCreditCost, type SaviTextToImageQuality } from '@/lib/ai/saviAgent';
 import { type SaviUser } from '@/lib/auth/session';
 import { getSaviDataConnect, getSaviPrivateBucket } from '@/lib/firebase/admin';
+import {
+  quoteSaviPrice,
+  SaviPricingError,
+  serializeSaviPricingMetadata,
+  type SaviPricingQuote
+} from '@/lib/pricing/saviPricing';
+import type { TextToImageAspectRatio, TextToImageQuality } from '@/lib/pricing/textToImageCatalog';
 
 const DEVELOPMENT_INITIAL_CREDITS = 20_000;
 const CLIENT_REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']);
+const UUID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9a-f]{32})$/i;
+const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 export type SaviFailureCategory =
   | 'PROVIDER_TIMEOUT'
@@ -18,13 +24,15 @@ export type SaviFailureCategory =
   | 'INSUFFICIENT_CREDITS'
   | 'STORAGE_FAILURE'
   | 'AUTH_REQUIRED'
+  | 'PRICING_NOT_CONFIGURED'
   | 'INTERNAL_ERROR';
 
 export class SaviInfrastructureError extends Error {
   constructor(
     readonly category: SaviFailureCategory,
     readonly status: number,
-    message: string
+    message: string,
+    readonly providerRequestId?: string
   ) {
     super(message);
     this.name = 'SaviInfrastructureError';
@@ -46,6 +54,10 @@ type CreditAccount = {
   userId: string;
   availableCredits: number;
   reservedCredits: number;
+};
+
+export type AuthoritativeCreditBalance = {
+  availableCredits: number;
 };
 
 type GenerationJob = {
@@ -83,7 +95,7 @@ export type GeneratedImageOutput = {
   image: string;
   filename: string;
   mimeType: string;
-  mode: 'gemini' | 'local-preview';
+  mode: 'gemini';
   providerRequestId?: string;
   usage?: {
     inputTokens?: number;
@@ -103,6 +115,7 @@ type Reservation = {
   jobId: string;
   reservationId: string;
   credits: number;
+  pricing: SaviPricingQuote;
 };
 
 type ExistingJobResult =
@@ -137,8 +150,8 @@ export type ProtectedTextToImageResult =
 export type ProtectedTextToImageRequest = {
   user: SaviUser;
   clientRequestId: string;
-  quality: SaviTextToImageQuality;
-  aspectRatio: string;
+  quality: TextToImageQuality;
+  aspectRatio: TextToImageAspectRatio;
   referenceImageCount: number;
   provider: string;
   model: string;
@@ -173,6 +186,8 @@ function errorMessage(category: SaviFailureCategory) {
       return 'This request cannot be generated. Try a different image idea.';
     case 'STORAGE_FAILURE':
       return 'SAVI could not save the generated image. Your credits were not used.';
+    case 'PRICING_NOT_CONFIGURED':
+      return 'This image configuration is not available right now. No credits were used.';
     default:
       return 'SAVI could not complete that image request. Please try again.';
   }
@@ -281,11 +296,25 @@ export async function resolveSaviDatabaseUser(user: SaviUser): Promise<DatabaseU
   }
 }
 
-async function getCreditAccount(userId: string) {
+async function findCreditAccount(userId: string) {
   const data = await dataConnectQuery<{ creditAccounts?: CreditAccount[] }, { userId: string }>('GetCreditAccount', { userId });
-  const account = data.creditAccounts?.[0];
+  return data.creditAccounts?.[0] ?? null;
+}
+
+async function getCreditAccount(userId: string) {
+  const account = await findCreditAccount(userId);
   if (!account) throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
   return account;
+}
+
+export async function getAuthoritativeCreditBalance(user: SaviUser): Promise<AuthoritativeCreditBalance | null> {
+  const databaseUser = await findUserByIdentity(user);
+  if (!databaseUser) return null;
+
+  const account = await findCreditAccount(databaseUser.id);
+  if (!account) return null;
+
+  return { availableCredits: account.availableCredits };
 }
 
 async function findGenerationJob(userId: string, clientRequestId: string) {
@@ -322,21 +351,12 @@ export async function getOwnedPrivateAsset(user: SaviUser, assetId: string) {
   return data.assets?.[0] ?? null;
 }
 
-function outputMode(job: GenerationJob): GeneratedImageOutput['mode'] {
-  try {
-    const parsed = JSON.parse(job.usageMetadata || '{}') as { mode?: unknown };
-    return parsed.mode === 'local-preview' ? 'local-preview' : 'gemini';
-  } catch {
-    return 'gemini';
-  }
-}
-
 async function existingJobResult(userId: string, job: GenerationJob): Promise<ExistingJobResult> {
   if (job.status === 'processing') return { state: 'processing', jobId: job.id };
   if (job.status === 'completed') {
     const asset = await getAssetForJob(userId, job.id);
     if (!asset) throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
-    return { state: 'completed', asset, mode: outputMode(job) };
+    return { state: 'completed', asset, mode: 'gemini' };
   }
   if (job.status === 'failed') {
     throw new SaviInfrastructureError('INTERNAL_ERROR', 409, 'That image request already ended. Please generate it again.');
@@ -344,26 +364,33 @@ async function existingJobResult(userId: string, job: GenerationJob): Promise<Ex
   return null;
 }
 
+async function existingTextToImageJobResult(userId: string, clientRequestId: string) {
+  const existing = await findGenerationJob(userId, clientRequestId);
+  if (!existing) return null;
+  if (existing.toolId !== 'text_to_image') {
+    throw new SaviInfrastructureError('INVALID_INPUT', 409, 'This retry identifier belongs to a different SAVI request. Start a new generation.');
+  }
+  return existingJobResult(userId, existing);
+}
+
 async function reserveTextToImageCredits(input: {
   userId: string;
   clientRequestId: string;
-  credits: number;
+  pricing: SaviPricingQuote;
   provider: string;
   model: string;
-  quality: SaviTextToImageQuality;
-  aspectRatio: string;
+  quality: TextToImageQuality;
+  aspectRatio: TextToImageAspectRatio;
   referenceImageCount: number;
 }): Promise<Reservation | ReusableJobResult> {
-  const existing = await findGenerationJob(input.userId, input.clientRequestId);
-  if (existing) {
-    const result = await existingJobResult(input.userId, existing);
-    if (result) return result;
-  }
+  const reusable = await existingTextToImageJobResult(input.userId, input.clientRequestId);
+  if (reusable) return reusable;
 
   const reservation: Reservation = {
     jobId: randomUUID(),
     reservationId: randomUUID(),
-    credits: input.credits
+    credits: input.pricing.saviCredits,
+    pricing: input.pricing
   };
 
   try {
@@ -385,7 +412,8 @@ async function reserveTextToImageCredits(input: {
         model: input.model,
         resolution: input.quality,
         aspectRatio: input.aspectRatio,
-        referenceImageCount: input.referenceImageCount
+        referenceImageCount: input.referenceImageCount,
+        pricing: serializeSaviPricingMetadata(input.pricing)
       })
     });
     return reservation;
@@ -395,10 +423,11 @@ async function reserveTextToImageCredits(input: {
       throw new SaviInfrastructureError('INSUFFICIENT_CREDITS', 402, errorMessage('INSUFFICIENT_CREDITS'));
     }
 
-    const racedJob = await findGenerationJob(input.userId, input.clientRequestId).catch(() => null);
-    if (racedJob) {
-      const result = await existingJobResult(input.userId, racedJob);
-      if (result) return result;
+    try {
+      const racedResult = await existingTextToImageJobResult(input.userId, input.clientRequestId);
+      if (racedResult) return racedResult;
+    } catch (raceError) {
+      if (raceError instanceof SaviInfrastructureError) throw raceError;
     }
     throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
   }
@@ -421,7 +450,6 @@ function parseDataUrl(dataUrl: string) {
 function extensionForMimeType(mimeType: string) {
   if (mimeType === 'image/jpeg') return 'jpg';
   if (mimeType === 'image/webp') return 'webp';
-  if (mimeType === 'image/svg+xml') return 'svg';
   return 'png';
 }
 
@@ -463,8 +491,8 @@ async function finalizeTextToImage(input: {
   storedAsset: StoredAsset;
   output: GeneratedImageOutput;
   model: string;
-  quality: SaviTextToImageQuality;
-  aspectRatio: string;
+  quality: TextToImageQuality;
+  aspectRatio: TextToImageAspectRatio;
   referenceImageCount: number;
   durationMs: number;
 }) {
@@ -480,7 +508,12 @@ async function finalizeTextToImage(input: {
     model: input.model,
     chargeLedgerAmount: 0,
     providerRequestId: input.output.providerRequestId || null,
-    usageMetadata: metadata({ mode: input.output.mode, aspectRatio: input.aspectRatio, resolution: input.quality }),
+    usageMetadata: metadata({
+      mode: input.output.mode,
+      aspectRatio: input.aspectRatio,
+      resolution: input.quality,
+      pricing: serializeSaviPricingMetadata(input.reservation.pricing)
+    }),
     assetStoragePath: input.storedAsset.storagePath,
     assetFilename: input.storedAsset.filename,
     assetMimeType: input.storedAsset.mimeType,
@@ -505,7 +538,8 @@ async function finalizeTextToImage(input: {
       imageCount: 1,
       creditsReserved: input.reservation.credits,
       creditsCharged: input.reservation.credits,
-      creditsReleased: 0
+      creditsReleased: 0,
+      pricing: serializeSaviPricingMetadata(input.reservation.pricing)
     })
   });
 }
@@ -514,8 +548,8 @@ async function releaseTextToImageReservation(input: {
   userId: string;
   reservation: Reservation;
   model: string;
-  quality: SaviTextToImageQuality;
-  aspectRatio: string;
+  quality: TextToImageQuality;
+  aspectRatio: TextToImageAspectRatio;
   referenceImageCount: number;
   durationMs: number;
   failure: SaviInfrastructureError;
@@ -556,7 +590,8 @@ async function releaseTextToImageReservation(input: {
         failureCategory: input.failure.category,
         creditsReserved: input.reservation.credits,
         creditsCharged: 0,
-        creditsReleased: input.reservation.credits
+        creditsReleased: input.reservation.credits,
+        pricing: serializeSaviPricingMetadata(input.reservation.pricing)
       })
     });
   } catch {
@@ -570,42 +605,83 @@ export function classifyTextToImageFailure(error: unknown) {
 
   const status = errorStatus(error);
   const text = errorText(error);
+  const providerRequestId =
+    error && typeof error === 'object' && typeof (error as { providerRequestId?: unknown }).providerRequestId === 'string'
+      ? (error as { providerRequestId: string }).providerRequestId.slice(0, 512)
+      : undefined;
   if (status === 408 || status === 504 || text.includes('timeout') || text.includes('timed out')) {
-    return new SaviInfrastructureError('PROVIDER_TIMEOUT', 504, errorMessage('PROVIDER_TIMEOUT'));
+    return new SaviInfrastructureError('PROVIDER_TIMEOUT', 504, errorMessage('PROVIDER_TIMEOUT'), providerRequestId);
   }
   if (status === 429 || text.includes('rate limit') || text.includes('high demand')) {
-    return new SaviInfrastructureError('PROVIDER_RATE_LIMIT', 429, errorMessage('PROVIDER_RATE_LIMIT'));
+    return new SaviInfrastructureError('PROVIDER_RATE_LIMIT', 429, errorMessage('PROVIDER_RATE_LIMIT'), providerRequestId);
   }
   if (text.includes('policy') || text.includes('safety') || text.includes('blocked') || text.includes('rejected')) {
-    return new SaviInfrastructureError('POLICY_REJECTION', 422, errorMessage('POLICY_REJECTION'));
+    return new SaviInfrastructureError('POLICY_REJECTION', 422, errorMessage('POLICY_REJECTION'), providerRequestId);
   }
   if (status === 400 || text.includes('invalid') || text.includes('prompt')) {
-    return new SaviInfrastructureError('INVALID_INPUT', 400, errorMessage('INVALID_INPUT'));
+    return new SaviInfrastructureError('INVALID_INPUT', 400, errorMessage('INVALID_INPUT'), providerRequestId);
   }
   if (status === 415 || text.includes('unsupported')) {
-    return new SaviInfrastructureError('UNSUPPORTED_INPUT', 422, errorMessage('UNSUPPORTED_INPUT'));
+    return new SaviInfrastructureError('UNSUPPORTED_INPUT', 422, errorMessage('UNSUPPORTED_INPUT'), providerRequestId);
   }
-  return new SaviInfrastructureError('PROVIDER_SERVER_ERROR', 502, errorMessage('PROVIDER_SERVER_ERROR'));
+  return new SaviInfrastructureError('PROVIDER_SERVER_ERROR', 502, errorMessage('PROVIDER_SERVER_ERROR'), providerRequestId);
 }
 
 async function spendableCredits(userId: string) {
   return (await getCreditAccount(userId)).availableCredits;
 }
 
-export async function runProtectedTextToImage(input: ProtectedTextToImageRequest): Promise<ProtectedTextToImageResult> {
-  if (!isTextToImageEnabled()) {
-    throw new SaviInfrastructureError('INTERNAL_ERROR', 503, 'Text to Image is temporarily unavailable.');
+function quoteProtectedTextToImage(input: Pick<ProtectedTextToImageRequest, 'provider' | 'model' | 'quality' | 'aspectRatio' | 'referenceImageCount'>) {
+  try {
+    return quoteSaviPrice({
+      provider: input.provider,
+      model: input.model,
+      toolId: 'text_to_image',
+      operation: 'image_generation',
+      input: { referenceImageCount: input.referenceImageCount },
+      output: {
+        imageCount: 1,
+        resolution: input.quality,
+        aspectRatio: input.aspectRatio
+      }
+    });
+  } catch (error) {
+    if (error instanceof SaviPricingError) {
+      const category = error.category === 'INVALID_PRICING_INPUT' ? 'INVALID_INPUT' : 'PRICING_NOT_CONFIGURED';
+      throw new SaviInfrastructureError(category, error.status, errorMessage(category));
+    }
+    throw new SaviInfrastructureError('PRICING_NOT_CONFIGURED', 503, errorMessage('PRICING_NOT_CONFIGURED'));
   }
+}
+
+export async function runProtectedTextToImage(input: ProtectedTextToImageRequest): Promise<ProtectedTextToImageResult> {
   if (!CLIENT_REQUEST_ID.test(input.clientRequestId)) {
     throw new SaviInfrastructureError('INVALID_INPUT', 400, errorMessage('INVALID_INPUT'));
   }
 
   const databaseUser = await resolveSaviDatabaseUser(input.user);
-  const credits = getSaviTextToImageCreditCost(input.quality);
+  const existing = await existingTextToImageJobResult(databaseUser.id, input.clientRequestId);
+  if (existing) {
+    const availableCredits = await spendableCredits(databaseUser.id).catch(() => undefined);
+    if (existing.state === 'processing') return { ...existing, availableCredits };
+    return {
+      state: 'completed',
+      jobId: existing.asset.jobId,
+      assetId: existing.asset.id,
+      filename: existing.asset.filename,
+      mode: existing.mode,
+      availableCredits
+    };
+  }
+  if (!isTextToImageEnabled()) {
+    throw new SaviInfrastructureError('INTERNAL_ERROR', 503, 'Text to Image is temporarily unavailable.');
+  }
+
+  const pricing = quoteProtectedTextToImage(input);
   const reserved = await reserveTextToImageCredits({
     userId: databaseUser.id,
     clientRequestId: input.clientRequestId,
-    credits,
+    pricing,
     provider: input.provider,
     model: input.model,
     quality: input.quality,
@@ -686,7 +762,7 @@ export async function runProtectedTextToImage(input: ProtectedTextToImageRequest
         jobId: reserved.jobId,
         assetId: existingAsset.id,
         filename: existingAsset.filename,
-        mode: outputMode(job),
+        mode: 'gemini',
         availableCredits: await spendableCredits(databaseUser.id).catch(() => undefined)
       };
     }

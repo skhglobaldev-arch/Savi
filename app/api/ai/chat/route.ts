@@ -1,30 +1,38 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import { requestGeminiWithFallback } from '@/lib/ai/geminiResilience';
+import { getConfiguredTextModel, getConfiguredTextModels } from '@/lib/pricing/saviPricing';
+import { consumeSaviFairUse, getSaviFairUseConfig } from '@/lib/savi/fairUse';
+import { recordFreeAiUsage } from '@/lib/savi/protectedOperations';
 
 export const runtime = 'nodejs';
 
 const MAX_MESSAGE_LENGTH = 4000;
-const DEFAULT_TEXT_MODEL = 'gemini-3.6-flash';
 
 type ChatRequest = {
   message?: string;
   mode?: string;
   templateId?: string;
-  history?: Array<{
-    role?: 'user' | 'assistant';
-    content?: string;
-  }>;
+  clientRequestId?: string;
+  history?: Array<{ role?: 'user' | 'assistant'; content?: string }>;
+};
+
+type GeminiChatResponse = {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  usageMetadata?: Record<string, unknown>;
+  usage_metadata?: Record<string, unknown>;
+  error?: { message?: string };
+  [key: string]: unknown;
 };
 
 function extractInteractionText(value: unknown): string {
   if (!value || typeof value !== 'object') return '';
   const record = value as Record<string, unknown>;
-
   if (typeof record.output_text === 'string') return record.output_text.trim();
   if (typeof record.outputText === 'string') return record.outputText.trim();
-
   const steps = Array.isArray(record.steps) ? record.steps : [];
-  for (const step of [...steps].reverse()) {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index];
     if (!step || typeof step !== 'object') continue;
     const content = (step as { content?: unknown }).content;
     if (!Array.isArray(content)) continue;
@@ -35,52 +43,20 @@ function extractInteractionText(value: unknown): string {
       .trim();
     if (text) return text;
   }
-
   const candidates = record.candidates as Array<{ content?: { parts?: Array<{ text?: string }> } }> | undefined;
   return candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim() || '';
 }
 
-function createLocalAnswer(message: string, mode?: string, templateId?: string, continuity = false) {
-  const clean = message.trim();
-  const visibleMode = mode === 'Ask AI' ? 'Ask SAVI' : mode;
-  const today = new Date().toLocaleDateString('en-GB', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
-
-  const persian = isPersianOrFinglish(clean);
-  const heading = continuity
-    ? persian
-      ? 'SAVI اینجاست'
-      : 'SAVI is here'
-    : 'SAVI answer';
-  const note = continuity
-    ? persian
-      ? '\nبرای اینکه پاسخ دقیق از دست نرود، همین پیام را نگه داشتم. اگر سوالت به یک ابزار SAVI مربوط است، می‌توانم مسیر درست را قدم‌به‌قدم جلو ببرم.\n'
-      : '\nI kept your request intact. If this needs a SAVI tool, I can still guide the right next step while the detailed reply reconnects.\n'
-    : '';
-
-  return `${heading}
-
-Today is ${today}.
-
-I understood your request${visibleMode ? ` in ${visibleMode} mode` : ''}${templateId ? ` using ${templateId}` : ''}.
-
-Summary
-- ${clean.slice(0, 220)}${clean.length > 220 ? '...' : ''}
-
-Useful next steps
-1. Clarify the exact output you want.
-2. Add any file, image, or context if the tool needs it.
-3. Generate the final result and download it from SAVI.${note}
-
-SAVI is ready to continue.`;
-}
-
 function isPersianOrFinglish(text: string) {
   return /[\u0600-\u06FF]/.test(text) || /\b(salam|khobi|mikham|mikhay?m|mikhastam|safhe|safha|safahat|jabe|jabeja|biad|biare|bere|bzar|bfrst|tabdil|seda|aks|ax|matn|baram|beshe|mishe)\b/i.test(text);
+}
+
+function createContinuityAnswer(message: string) {
+  const persian = isPersianOrFinglish(message);
+  if (persian) {
+    return `پیامت را گرفتم. الان پاسخ عمیق SAVI موقتاً در دسترس نیست، اما درخواستت در همین گفت‌وگو می‌ماند و لازم نیست دوباره چیزی را آپلود یا توضیح بدهی.\n\nاگر کارت به یک خروجی مشخص نیاز دارد، می‌توانم در ادامه همان مسیر درست را باز کنم: برای تصویر، PDF، ویدیو یا صدا فقط بگو خروجی نهایی را چه شکلی می‌خواهی.`;
+  }
+  return 'I have your message. SAVI’s deeper reply is temporarily unavailable, but your request remains in this chat and you do not need to upload or explain anything again. Tell me the exact output you want next and I can continue with the right Image, PDF, Video, or Voice path.';
 }
 
 function conversationContext(history: ChatRequest['history']) {
@@ -92,55 +68,96 @@ function conversationContext(history: ChatRequest['history']) {
   return entries.length ? `Conversation memory:\n${entries.join('\n')}\n\n` : '';
 }
 
-export async function POST(request: Request) {
+function usageFromProvider(data: GeminiChatResponse) {
+  const usage = data.usageMetadata ?? data.usage_metadata;
+  if (!usage || typeof usage !== 'object') return undefined;
+  const record = usage as Record<string, unknown>;
+  const inputTokens = record.promptTokenCount ?? record.inputTokens ?? record.input_tokens;
+  const outputTokens = record.candidatesTokenCount ?? record.outputTokens ?? record.output_tokens;
+  return {
+    inputTokens: typeof inputTokens === 'number' ? inputTokens : undefined,
+    outputTokens: typeof outputTokens === 'number' ? outputTokens : undefined
+  };
+}
+
+function groundingRequestCount(value: unknown, depth = 0): number {
+  if (depth > 8 || !value || typeof value !== 'object') return 0;
+  if (Array.isArray(value)) return value.reduce((count, item) => count + groundingRequestCount(item, depth + 1), 0);
+  const record = value as Record<string, unknown>;
+  let count = 0;
+  for (const [key, child] of Object.entries(record)) {
+    const normalized = key.toLowerCase();
+    if (normalized.includes('grounding') || normalized.includes('search')) {
+      if (Array.isArray(child)) count += Math.max(1, child.length);
+      else if (child && typeof child === 'object') count += 1;
+      else if (child) count += 1;
+    }
+    count += groundingRequestCount(child, depth + 1);
+  }
+  return Math.min(count, 20);
+}
+
+async function recordUsageSafely(input: Parameters<typeof recordFreeAiUsage>[0]) {
+  await recordFreeAiUsage(input).catch(() => undefined);
+}
+
+export async function POST(request: NextRequest) {
+  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  if (!session) {
+    return NextResponse.json({ error: 'Please sign in to chat with SAVI.', category: 'AUTH_REQUIRED' }, { status: 401 });
+  }
+  const fairUse = consumeSaviFairUse(session.id);
+  if (!fairUse.allowed) {
+    return NextResponse.json(
+      { error: `SAVI is taking a short breather. Please try again in ${fairUse.retryAfterSeconds} seconds.`, category: 'FAIR_USE_LIMIT' },
+      { status: 429, headers: { 'Retry-After': String(fairUse.retryAfterSeconds) } }
+    );
+  }
+
+  const startedAt = Date.now();
   try {
     const body = (await request.json().catch(() => ({}))) as ChatRequest;
     const message = body.message?.trim() ?? '';
-
-    if (!message) {
-      return NextResponse.json({ error: 'Message is required.' }, { status: 400 });
-    }
-
+    if (!message) return NextResponse.json({ error: 'Message is required.' }, { status: 400 });
     if (message.length > MAX_MESSAGE_LENGTH) {
       return NextResponse.json({ error: `Message is too long. Limit it to ${MAX_MESSAGE_LENGTH} characters for now.` }, { status: 400 });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
     const now = new Date();
-    const currentDate = now.toLocaleDateString('en-GB', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
+    const currentDate = now.toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     const userLanguageHint = isPersianOrFinglish(message) ? 'Persian/Finglish' : 'English or user-selected language';
+    const model = getConfiguredTextModel();
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({
-        response: createLocalAnswer(message, body.mode, body.templateId),
-        mode: 'local-preview'
+      await recordUsageSafely({
+        user: session,
+        clientRequestId: body.clientRequestId,
+        toolId: 'ask_savi_chat',
+        provider: 'savi_local',
+        model: 'continuity',
+        success: true,
+        durationMs: Date.now() - startedAt,
+        metadata: { responseMode: 'continuity_no_provider' }
       });
+      return NextResponse.json({ response: createContinuityAnswer(message), mode: 'continuity' });
     }
 
     const systemInstruction = [
       'You are SAVI, Smart Assistant for Valuable Ideas by SKH.GLOBAL.',
-      'Be helpful, clear, practical, concise, and warmly energetic. Sound like a sharp, encouraging creative partner, never like a cold support bot.',
-      'Answer like a premium AI workspace assistant.',
-      'Do not repeat the same guidance twice.',
-      'For normal chat, reply naturally in the user language and do not add file download language.',
-      'Normal chat guidance is free in the SAVI interface; do not tell users that chat consumes credits.',
-      'SAVI has tools for Images, Voice, Radio Talk, Files/PDF, and Video. If a user asks for one of those workflows, give a short useful next step instead of a long checklist.',
-      'Know SAVI tools as capabilities: text chat, text to image, image editing, remove background/object, mockups, story sketch, sketch to image, visual mixer, text to speech, radio podcast, PDF summarizing/explaining/translating, PDF to podcast script, and video script/video generation workflows.',
-      'When the user describes a goal, think like a product assistant: recommend the simplest SAVI path, mention if multiple tools may be useful, and ask only the missing questions needed to proceed.',
-      'Do not show coding words, backend terms, API names, Firebase, Stripe, or implementation details to the user.',
-      'If the user needs to upload something, tell them to use the + button in SAVI.',
-      'Do not pretend a tool output was generated unless the server actually generated it.',
-      'Only claim to process files/images/audio when the selected tool actually provided that content.',
-      `Current real date: ${currentDate}. Use this exact date when the user asks about today, tomorrow, yesterday, schedules, or current time-sensitive context.`,
-      `User language hint: ${userLanguageHint}. Reply in the same language/style unless the user asks otherwise. Finglish should receive Persian/Finglish-friendly Persian guidance.`
+      'Be helpful, clear, practical, concise, warmly energetic, and intelligently proactive.',
+      'Reply naturally in the user language. Persian and Finglish should receive Persian-friendly replies.',
+      'Normal SAVI chat is free. Never mention provider cost, internal credits, APIs, models, Firebase, keys, or implementation details.',
+      'SAVI understands tools for Images, Video, Voice, Files/PDF, and search-grounded help. Recommend the simplest correct SAVI path and ask only the missing question needed to proceed.',
+      'Remember active conversation details. Never tell a user to upload an attachment again when it is already present in the supplied conversation context.',
+      'For a PDF page reorder/merge/split request, recommend the organizing or merge workflow, not explanation or summary.',
+      'For text to speech, first make sure you have the exact text, then voice preferences only if missing.',
+      'Do not claim that an output was generated unless the server actually generated it.',
+      `Current real date: ${currentDate}.`,
+      `User language hint: ${userLanguageHint}.`
     ].join('\n');
 
-    const requestBody = (model: string) => ({
-      model,
+    const requestBody = (nextModel: string) => ({
+      model: nextModel,
       system_instruction: systemInstruction,
       input: [
         {
@@ -149,68 +166,67 @@ export async function POST(request: Request) {
             body.mode ? `Selected mode: ${body.mode === 'Ask AI' ? 'Ask SAVI' : body.mode}` : '',
             body.templateId ? `Selected template: ${body.templateId}` : '',
             `Current date: ${currentDate}`,
-            `Reply language: ${userLanguageHint}`,
-            '',
             conversationContext(body.history),
             'Latest user message:',
             message
-          ]
-            .filter(Boolean)
-            .join('\n')
+          ].filter(Boolean).join('\n')
         }
       ],
-      generation_config: { thinking_level: 'low' },
+      generation_config: { thinking_level: 'low', max_output_tokens: getSaviFairUseConfig().maxOutputTokens },
       tools: [{ type: 'google_search' }]
     });
 
-    type GeminiChatResponse = {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      error?: { message?: string };
-    };
-
-    let data: GeminiChatResponse;
-    let model = 'local-continuity';
+    let providerData: GeminiChatResponse;
+    let resolvedModel = model;
+    let providerRequestId: string | undefined;
     try {
-      const result = await requestGeminiWithFallback<GeminiChatResponse>({
+      const provider = await requestGeminiWithFallback<GeminiChatResponse>({
         apiKey,
-        models: [process.env.GEMINI_TEXT_MODEL || DEFAULT_TEXT_MODEL, 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+        models: getConfiguredTextModels(model),
         requestForModel: (nextModel) => ({
           url: 'https://generativelanguage.googleapis.com/v1beta/interactions',
-          init: {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody(nextModel))
-          }
+          init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody(nextModel)) }
         }),
         parseError: (value) => value.error?.message
       });
-      data = result.data;
-      model = result.model;
+      providerData = provider.data;
+      resolvedModel = provider.model;
+      providerRequestId = provider.providerRequestId;
     } catch {
-      // A warm in-app response is better than forwarding a provider capacity error.
-      return NextResponse.json({
-        response: createLocalAnswer(message, body.mode, body.templateId, true),
-        mode: 'continuity'
+      await recordUsageSafely({
+        user: session,
+        clientRequestId: body.clientRequestId,
+        toolId: 'ask_savi_chat',
+        provider: 'savi_local',
+        model: 'continuity',
+        success: true,
+        durationMs: Date.now() - startedAt,
+        metadata: { responseMode: 'continuity_after_provider_failure' }
       });
+      return NextResponse.json({ response: createContinuityAnswer(message), mode: 'continuity' });
     }
 
-    const text = extractInteractionText(data);
-
-    if (!text) {
-      return NextResponse.json({
-        response: createLocalAnswer(message, body.mode, body.templateId, true),
-        mode: 'continuity'
-      });
-    }
-
-    return NextResponse.json({
-      response: text,
-      mode: model
+    const text = extractInteractionText(providerData);
+    const usage = usageFromProvider(providerData);
+    const groundedRequests = groundingRequestCount(providerData);
+    await recordUsageSafely({
+      user: session,
+      clientRequestId: body.clientRequestId,
+      toolId: groundedRequests ? 'ask_savi_grounded_chat' : 'ask_savi_chat',
+      provider: 'gemini',
+      model: resolvedModel,
+      success: Boolean(text),
+      durationMs: Date.now() - startedAt,
+      inputTokens: usage?.inputTokens,
+      outputTokens: usage?.outputTokens,
+      groundingRequestCount: groundedRequests,
+      providerRequestId,
+      metadata: { responseMode: text ? 'provider' : 'continuity_after_empty_provider_response', groundingDetected: groundedRequests > 0 }
     });
+
+    if (!text) return NextResponse.json({ response: createContinuityAnswer(message), mode: 'continuity' });
+    return NextResponse.json({ response: text, mode: resolvedModel });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Chat request failed.' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Chat request failed.' }, { status: 500 });
   }
 }

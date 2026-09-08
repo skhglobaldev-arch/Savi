@@ -1,16 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { type SaviTextToImageQuality } from '@/lib/ai/saviAgent';
 import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import {
+  isTextToImageAspectRatio,
+  isTextToImageQuality,
+  type TextToImageAspectRatio,
+  type TextToImageQuality
+} from '@/lib/pricing/textToImageCatalog';
+import {
+  getConfiguredTextToImageModel,
+  SAVI_IMAGE_GENERATION_TOOL_IDS,
+  SAVI_TEXT_TO_IMAGE_PROVIDER
+} from '@/lib/pricing/saviPricing';
 import {
   runProtectedTextToImage,
   SaviInfrastructureError,
   type GeneratedImageOutput
 } from '@/lib/savi/textToImageInfrastructure';
+import { runProtectedOperation, type SaviProtectedOutput } from '@/lib/savi/protectedOperations';
 
 export const runtime = 'nodejs';
 
 const MAX_PROMPT_LENGTH = 4000;
-const DEFAULT_IMAGE_MODEL = 'gemini-3.1-flash-image';
+const MAX_REFERENCE_BYTES = 12 * 1024 * 1024;
 
 type ImageReference = {
   data?: string;
@@ -48,22 +59,6 @@ class ImageGenerationProviderError extends Error {
     super(message);
     this.name = 'ImageGenerationProviderError';
   }
-}
-
-function escapeXml(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
-}
-
-function sizeForRatio(aspectRatio: string) {
-  if (aspectRatio === '16:9') return { width: 1344, height: 768 };
-  if (aspectRatio === '9:16') return { width: 768, height: 1344 };
-  if (aspectRatio === '4:5') return { width: 896, height: 1152 };
-  return { width: 1024, height: 1024 };
 }
 
 function imageSizeForQuality(quality?: string) {
@@ -134,7 +129,9 @@ function buildPrompt({ prompt, toolId, style, referenceImage, referenceImages }:
                 ? 'Create a photorealistic mockup. Use the first reference image as the logo, artwork, or design. If a second reference image is provided, use it as the target surface or environment. Place the design naturally with realistic perspective, lighting, shadows, reflections, and material texture. Do not add unrelated logos, random text, watermark labels, or extra brand names.'
                 : toolId === 'visual_mixer'
                   ? 'Blend the provided subject, scene, and style references into one cohesive generated image. Preserve key cues from each selected reference while making a single natural composition, not a collage, grid, or moodboard.'
-                  : toolId === 'product_photo'
+                  : toolId === 'variations'
+                    ? 'Create one polished visual variation from the supplied reference. Preserve the core subject, product, and brand direction while applying only the requested creative change.'
+                    : toolId === 'product_photo'
                     ? 'Create a polished product photography image suitable for ads.'
                     : toolId === 'edit_image'
                       ? 'Edit the provided image while preserving the main subject and original structure.'
@@ -155,62 +152,55 @@ function buildPrompt({ prompt, toolId, style, referenceImage, referenceImages }:
   ].join('\n');
 }
 
-function createLocalPreviewImage(prompt: string, aspectRatio: string, quality?: string, style?: string) {
-  const { width, height } = sizeForRatio(aspectRatio);
-  const safePrompt = escapeXml(prompt.slice(0, 190));
-  const safeStyle = escapeXml(style || 'Premium');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <defs>
-    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="0.45" stop-color="#ede9fe"/>
-      <stop offset="1" stop-color="#dbeafe"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="30%" cy="24%" r="60%">
-      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#38bdf8" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="28" stdDeviation="28" flood-color="#7c3aed" flood-opacity="0.22"/>
-    </filter>
-  </defs>
-  <rect width="100%" height="100%" fill="url(#bg)"/>
-  <rect width="100%" height="100%" fill="url(#glow)"/>
-  <g filter="url(#shadow)">
-    <rect x="${width * 0.1}" y="${height * 0.16}" width="${width * 0.8}" height="${height * 0.68}" rx="42" fill="#ffffff" fill-opacity="0.74" stroke="#a78bfa" stroke-opacity="0.55"/>
-    <circle cx="${width * 0.28}" cy="${height * 0.34}" r="${Math.min(width, height) * 0.1}" fill="#7c3aed" fill-opacity="0.9"/>
-    <rect x="${width * 0.43}" y="${height * 0.29}" width="${width * 0.32}" height="${height * 0.055}" rx="16" fill="#2563eb" fill-opacity="0.82"/>
-    <rect x="${width * 0.25}" y="${height * 0.5}" width="${width * 0.5}" height="${height * 0.045}" rx="14" fill="#0f172a" fill-opacity="0.78"/>
-    <rect x="${width * 0.31}" y="${height * 0.58}" width="${width * 0.38}" height="${height * 0.035}" rx="11" fill="#7c3aed" fill-opacity="0.54"/>
-  </g>
-  <text x="50%" y="${height * 0.11}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="${Math.max(28, width * 0.035)}" font-weight="800" fill="#170b36">SAVI Image Preview</text>
-  <text x="50%" y="${height * 0.89}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="${Math.max(18, width * 0.022)}" font-weight="700" fill="#475569">${escapeXml(`${safeStyle} · ${quality || '1080'} · ${aspectRatio}`)}</text>
-  <foreignObject x="${width * 0.18}" y="${height * 0.67}" width="${width * 0.64}" height="${height * 0.12}">
-    <div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Inter,Arial,sans-serif;font-size:${Math.max(18, width * 0.019)}px;line-height:1.35;text-align:center;color:#334155;font-weight:700">${safePrompt}</div>
-  </foreignObject>
-</svg>`;
-
-  return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
-}
-
 function referenceImagesFor(body: ImageRequest) {
-  return (Array.isArray(body.referenceImages) && body.referenceImages.length ? body.referenceImages : body.referenceImage ? [body.referenceImage] : [])
-    .filter((item): item is Required<Pick<ImageReference, 'data' | 'mimeType'>> & ImageReference => Boolean(item?.data && item?.mimeType))
-    .slice(0, body.toolId === 'mockup' ? 2 : body.toolId === 'visual_mixer' ? 6 : 3);
+  return Array.isArray(body.referenceImages) && body.referenceImages.length
+    ? body.referenceImages
+    : body.referenceImage
+      ? [body.referenceImage]
+      : [];
 }
 
 function validateImageRequest(body: ImageRequest) {
   const prompt = body.prompt?.trim() ?? '';
-  if (!prompt && !['remove_background', 'variations'].includes(body.toolId || '')) {
+  if (!prompt && body.toolId !== 'remove_background') {
     throw new ImageInputError('Prompt is required.');
   }
   if (prompt.length > MAX_PROMPT_LENGTH) {
     throw new ImageInputError(`Prompt is too long. Limit it to ${MAX_PROMPT_LENGTH} characters for now.`);
   }
 
-  const referenceImages = referenceImagesFor(body);
-  if (body.toolId === 'mockup' && referenceImages.length < 1) {
-    throw new ImageInputError('Mockup needs a logo or design image.');
+  const suppliedReferences = referenceImagesFor(body);
+  const maximumReferences = body.toolId === 'mockup' ? 2 : body.toolId === 'visual_mixer' ? 6 : 3;
+  if (suppliedReferences.length > maximumReferences) {
+    throw new ImageInputError(`This tool supports up to ${maximumReferences} reference images.`);
+  }
+
+  const referenceImages = suppliedReferences.map((reference) => {
+    if (!reference || typeof reference.data !== 'string' || !reference.data || typeof reference.mimeType !== 'string' || !reference.mimeType) {
+      throw new ImageInputError('Each reference image needs valid image data and a MIME type.');
+    }
+    const mimeType = reference.mimeType.toLowerCase();
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) {
+      throw new ImageInputError('Use PNG, JPEG, or WebP reference images.');
+    }
+    if (Math.ceil(reference.data.length * 0.75) > MAX_REFERENCE_BYTES) {
+      throw new ImageInputError('One reference image is too large. Use images under 12MB.');
+    }
+    return { ...reference, data: reference.data, mimeType };
+  });
+
+  const toolsThatRequireReference = new Set([
+    'sketch_to_image',
+    'edit_image',
+    'remove_background',
+    'remove_object',
+    'change_style',
+    'product_photo',
+    'mockup',
+    'variations'
+  ]);
+  if (toolsThatRequireReference.has(body.toolId || '') && referenceImages.length < 1) {
+    throw new ImageInputError('Add a reference image for this tool.');
   }
   return { prompt, referenceImages };
 }
@@ -230,15 +220,9 @@ async function generateImageOutput(body: ImageRequest): Promise<GeneratedImageOu
   const { prompt, referenceImages } = validateImageRequest(body);
   const apiKey = process.env.GEMINI_API_KEY;
   const aspectRatio = body.aspectRatio || '1:1';
-  const fallbackImage = createLocalPreviewImage(prompt || body.toolId || 'SAVI image', aspectRatio, body.quality, body.style);
 
   if (!apiKey) {
-    return {
-      image: fallbackImage,
-      filename: 'savi-image-local-preview.svg',
-      mimeType: 'image/svg+xml',
-      mode: 'local-preview'
-    };
+    throw new ImageGenerationProviderError('Image generation is not connected. Your credits were not used.', 503);
   }
 
   const input: Array<Record<string, string>> = [
@@ -268,7 +252,7 @@ async function generateImageOutput(body: ImageRequest): Promise<GeneratedImageOu
       'x-goog-api-key': apiKey
     },
     body: JSON.stringify({
-      model: process.env.GEMINI_IMAGE_MODEL || DEFAULT_IMAGE_MODEL,
+      model: getConfiguredTextToImageModel(),
       input,
       response_format: {
         type: 'image',
@@ -307,43 +291,66 @@ async function generateImageOutput(body: ImageRequest): Promise<GeneratedImageOu
   };
 }
 
-function protectedQuality(value: ImageRequest['quality']): SaviTextToImageQuality {
+function protectedQuality(value: ImageRequest['quality']): TextToImageQuality {
   if (!value) return '1080';
-  if (value === '720' || value === '1080' || value === '4K') return value;
+  if (isTextToImageQuality(value)) return value;
   throw new ImageInputError('Unsupported image quality.');
 }
 
+function protectedAspectRatio(value: ImageRequest['aspectRatio']): TextToImageAspectRatio {
+  const aspectRatio = value || '1:1';
+  if (isTextToImageAspectRatio(aspectRatio)) return aspectRatio;
+  throw new ImageInputError('Unsupported image aspect ratio.');
+}
+
+function protectedImageOutput(output: GeneratedImageOutput): SaviProtectedOutput {
+  const match = /^data:([^;,]+);base64,([A-Za-z0-9+/=\s]+)$/i.exec(output.image);
+  if (!match) {
+    throw new SaviInfrastructureError('UNSUPPORTED_INPUT', 422, 'SAVI could not save the generated image. Your credits were not used.');
+  }
+  return {
+    bytes: Buffer.from(match[2].replace(/\s/g, ''), 'base64'),
+    filename: output.filename,
+    mimeType: match[1].toLowerCase(),
+    mediaType: 'image',
+    providerRequestId: output.providerRequestId,
+    usage: {
+      inputTokens: output.usage?.inputTokens,
+      outputTokens: output.usage?.outputTokens,
+      imageCount: 1
+    }
+  };
+}
+
+function isActiveImageGenerationTool(toolId: string | undefined) {
+  return Boolean(toolId && SAVI_IMAGE_GENERATION_TOOL_IDS.includes(toolId as (typeof SAVI_IMAGE_GENERATION_TOOL_IDS)[number]));
+}
+
 export async function POST(request: NextRequest) {
+  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  if (!session) {
+    return NextResponse.json({ error: 'Please sign in before using this tool.', category: 'AUTH_REQUIRED' }, { status: 401 });
+  }
+
   const body = (await request.json().catch(() => ({}))) as ImageRequest;
   const isProtectedTextToImage = body.toolId === 'text_to_image';
 
   if (isProtectedTextToImage) {
-    const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
-    if (!session) {
-      return NextResponse.json({ error: 'Please sign in before generating an image.', category: 'AUTH_REQUIRED' }, { status: 401 });
-    }
-
     try {
       const { referenceImages } = validateImageRequest(body);
       const quality = protectedQuality(body.quality);
+      const aspectRatio = protectedAspectRatio(body.aspectRatio);
+      const model = getConfiguredTextToImageModel();
       const result = await runProtectedTextToImage({
         user: session,
         clientRequestId: body.clientRequestId || '',
         quality,
-        aspectRatio: body.aspectRatio || '1:1',
+        aspectRatio,
         referenceImageCount: referenceImages.length,
-        provider: 'gemini',
-        model: process.env.GEMINI_IMAGE_MODEL || DEFAULT_IMAGE_MODEL,
+        provider: SAVI_TEXT_TO_IMAGE_PROVIDER,
+        model,
         generate: async () => {
-          const output = await generateImageOutput({ ...body, quality });
-          if (output.mode === 'local-preview') {
-            throw new SaviInfrastructureError(
-              'PROVIDER_SERVER_ERROR',
-              503,
-              'The image service is temporarily unavailable. Your credits were not used.'
-            );
-          }
-          return output;
+          return generateImageOutput({ ...body, quality, aspectRatio });
         }
       });
 
@@ -374,13 +381,49 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const output = await generateImageOutput(body);
+    if (!isActiveImageGenerationTool(body.toolId)) {
+      return NextResponse.json({ error: 'This image tool is not available through the image generation route.' }, { status: 400 });
+    }
+
+    const { referenceImages } = validateImageRequest(body);
+    const quality = protectedQuality(body.quality);
+    const aspectRatio = protectedAspectRatio(body.aspectRatio);
+    const model = getConfiguredTextToImageModel();
+    const result = await runProtectedOperation({
+      user: session,
+      clientRequestId: body.clientRequestId || '',
+      toolId: body.toolId || '',
+      provider: SAVI_TEXT_TO_IMAGE_PROVIDER,
+      model,
+      operation: 'image_generation',
+      pricingInput: { referenceImageCount: referenceImages.length },
+      pricingOutput: { imageCount: 1, resolution: quality, aspectRatio },
+      mediaType: 'image',
+      generate: async () => {
+        const output = await generateImageOutput({ ...body, quality, aspectRatio });
+        return protectedImageOutput(output);
+      }
+    });
+
+    if (result.state === 'processing') {
+      return NextResponse.json(
+        { status: 'processing', jobId: result.jobId, availableCredits: result.availableCredits },
+        { status: 202 }
+      );
+    }
+
     return NextResponse.json({
-      image: output.image,
-      filename: output.filename,
-      mode: output.mode
+      image: `/api/assets/${result.assetId}`,
+      filename: result.filename,
+      mode: 'gemini',
+      jobId: result.jobId,
+      assetId: result.assetId,
+      availableCredits: result.availableCredits
     });
   } catch (error) {
+    if (error instanceof SaviInfrastructureError) {
+      return NextResponse.json({ error: error.message, category: error.category }, { status: error.status });
+    }
     if (error instanceof ImageInputError || error instanceof ImageGenerationProviderError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

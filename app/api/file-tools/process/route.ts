@@ -1,10 +1,17 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument, degrees } from 'pdf-lib';
 import JSZip from 'jszip';
 import path from 'node:path';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
+import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import {
-  binaryResponse,
+  SAVI_LOCAL_PDF_MODEL,
+  SAVI_LOCAL_PDF_PROVIDER,
+  SAVI_LOCAL_PDF_TOOL_IDS
+} from '@/lib/pricing/saviPricing';
+import { runProtectedOperation } from '@/lib/savi/protectedOperations';
+import { SaviInfrastructureError } from '@/lib/savi/textToImageInfrastructure';
+import {
   getPdfPageCount,
   parsePageRange,
   runCommand,
@@ -16,25 +23,30 @@ import {
 export const runtime = 'nodejs';
 
 type PdfAction = 'merge_pdf' | 'organize_pdf' | 'split_pdf' | 'pdf_to_jpg' | 'extract_images';
+type PagePlanItem = { pageNumber: number; rotation?: number };
+type PdfOutput = { bytes: Buffer; filename: string; mimeType: string; mediaType: 'document' | 'archive' };
 
-type PagePlanItem = {
-  pageNumber: number;
-  rotation?: number;
-};
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 80 * 1024 * 1024;
+const MAX_FILES = 12;
+const MAX_PAGES_PER_FILE = 250;
+const MAX_TOTAL_PAGES = 500;
+const MAX_JPG_OUTPUT_PAGES = 100;
+const MAX_EXTRACTED_IMAGES = 200;
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024;
-const MAX_FILES = 25;
-
-function isPdfFile(value: FormDataEntryValue): value is File {
-  return value instanceof File && value.type === 'application/pdf';
+class PdfInputError extends Error {
+  constructor(message: string, readonly status = 400) {
+    super(message);
+    this.name = 'PdfInputError';
+  }
 }
 
-function readAction(value: FormDataEntryValue | null): PdfAction | null {
-  if (typeof value !== 'string') return null;
-  if (['merge_pdf', 'organize_pdf', 'split_pdf', 'pdf_to_jpg', 'extract_images'].includes(value)) {
-    return value as PdfAction;
-  }
-  return null;
+function isPdfAction(value: string | undefined): value is PdfAction {
+  return Boolean(value && SAVI_LOCAL_PDF_TOOL_IDS.includes(value as (typeof SAVI_LOCAL_PDF_TOOL_IDS)[number]));
+}
+
+function isPdfFile(value: FormDataEntryValue): value is File {
+  return value instanceof File && (value.type === 'application/pdf' || value.name.toLowerCase().endsWith('.pdf'));
 }
 
 function readPagePlan(value: FormDataEntryValue | null): PagePlanItem[] {
@@ -43,10 +55,7 @@ function readPagePlan(value: FormDataEntryValue | null): PagePlanItem[] {
     const parsed = JSON.parse(value);
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .map((item) => ({
-        pageNumber: Number(item.pageNumber),
-        rotation: Number(item.rotation || 0)
-      }))
+      .map((item) => ({ pageNumber: Number(item?.pageNumber), rotation: Number(item?.rotation || 0) }))
       .filter((item) => Number.isInteger(item.pageNumber) && item.pageNumber > 0);
   } catch {
     return [];
@@ -57,17 +66,15 @@ function readSwapPages(value: FormDataEntryValue | null): [number, number] | nul
   if (typeof value !== 'string' || !value.trim()) return null;
   try {
     const parsed = JSON.parse(value);
-    if (!Array.isArray(parsed) || parsed.length < 2) return null;
+    if (!Array.isArray(parsed) || parsed.length !== 2) return null;
     const first = Number(parsed[0]);
     const second = Number(parsed[1]);
-    if (Number.isInteger(first) && Number.isInteger(second) && first > 0 && second > 0 && first !== second) {
-      return [first, second];
-    }
+    return Number.isInteger(first) && Number.isInteger(second) && first > 0 && second > 0 && first !== second
+      ? [first, second]
+      : null;
   } catch {
     return null;
   }
-
-  return null;
 }
 
 function normaliseRotation(rotation = 0) {
@@ -75,173 +82,193 @@ function normaliseRotation(rotation = 0) {
   return [0, 90, 180, 270].includes(next) ? next : 0;
 }
 
-async function createMergedPdf(files: File[]) {
-  const output = await PDFDocument.create();
+async function getValidatedPageCount(file: File) {
+  try {
+    const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+    const pageCount = pdf.getPageCount();
+    if (!pageCount) throw new Error('empty');
+    return pageCount;
+  } catch {
+    throw new PdfInputError(`“${file.name}” is not a readable PDF.`);
+  }
+}
 
+async function validateFiles(files: File[]) {
+  if (!files.length) throw new PdfInputError('Upload at least one PDF file.');
+  if (files.length > MAX_FILES) throw new PdfInputError(`You can process up to ${MAX_FILES} PDFs at once.`);
+  if (files.some((file) => file.size > MAX_FILE_SIZE)) {
+    throw new PdfInputError('One PDF is too large. Use files under 25MB.', 413);
+  }
+  const totalBytes = files.reduce((total, file) => total + file.size, 0);
+  if (totalBytes > MAX_TOTAL_BYTES) throw new PdfInputError('This request is too large. Keep all uploaded PDFs under 80MB total.', 413);
+
+  let totalPages = 0;
+  for (const file of files) {
+    const pageCount = await getValidatedPageCount(file);
+    if (pageCount > MAX_PAGES_PER_FILE) {
+      throw new PdfInputError(`“${file.name}” has too many pages. Use PDFs with up to ${MAX_PAGES_PER_FILE} pages.`);
+    }
+    totalPages += pageCount;
+  }
+  if (totalPages > MAX_TOTAL_PAGES) {
+    throw new PdfInputError(`This request has too many pages. Keep all uploaded PDFs under ${MAX_TOTAL_PAGES} pages total.`);
+  }
+  return totalPages;
+}
+
+async function createMergedPdf(files: File[]): Promise<PdfOutput> {
+  const output = await PDFDocument.create();
   for (const file of files) {
     const source = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
     const copiedPages = await output.copyPages(source, source.getPageIndices());
     copiedPages.forEach((page) => output.addPage(page));
   }
-
-  return Buffer.from(await output.save());
+  return { bytes: Buffer.from(await output.save()), filename: 'savi-merged.pdf', mimeType: 'application/pdf', mediaType: 'document' };
 }
 
-async function createPagePlanPdf(file: File, pagePlan: PagePlanItem[], mode: 'organize' | 'split', swapPages?: [number, number] | null) {
+async function createPagePlanPdf(file: File, pagePlan: PagePlanItem[], mode: 'organize' | 'split'): Promise<PdfOutput> {
   const source = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
   const output = await PDFDocument.create();
   const pageCount = source.getPageCount();
   let safePlan = pagePlan.filter((item) => item.pageNumber >= 1 && item.pageNumber <= pageCount);
-
   if (!safePlan.length && mode === 'organize') {
-    safePlan = Array.from({ length: pageCount }, (_, index) => ({
-      pageNumber: index + 1,
-      rotation: 0
-    }));
+    safePlan = Array.from({ length: pageCount }, (_, index) => ({ pageNumber: index + 1, rotation: 0 }));
   }
-
-  if (mode === 'organize' && swapPages) {
-    const [first, second] = swapPages;
-    if (first > pageCount || second > pageCount) {
-      throw new Error(`This PDF has ${pageCount} page${pageCount === 1 ? '' : 's'}. Choose pages within that range.`);
-    }
-
-    const firstIndex = safePlan.findIndex((item) => item.pageNumber === first);
-    const secondIndex = safePlan.findIndex((item) => item.pageNumber === second);
-    if (firstIndex >= 0 && secondIndex >= 0) {
-      [safePlan[firstIndex], safePlan[secondIndex]] = [safePlan[secondIndex], safePlan[firstIndex]];
-    }
-  }
-
-  if (!safePlan.length) {
-    throw new Error(mode === 'split' ? 'Select at least one page to export.' : 'No pages are available to export.');
-  }
-
+  if (!safePlan.length) throw new PdfInputError(mode === 'split' ? 'Select at least one page to export.' : 'No pages are available to export.');
+  if (safePlan.length > MAX_TOTAL_PAGES) throw new PdfInputError(`Export up to ${MAX_TOTAL_PAGES} pages at a time.`);
   for (const item of safePlan) {
     const [copiedPage] = await output.copyPages(source, [item.pageNumber - 1]);
     copiedPage.setRotation(degrees(normaliseRotation(item.rotation)));
     output.addPage(copiedPage);
   }
-
-  return Buffer.from(await output.save());
+  const suffix = mode === 'split' ? 'selected-pages' : 'organized';
+  return {
+    bytes: Buffer.from(await output.save()),
+    filename: `${sanitizeFileName(file.name)}-${suffix}.pdf`,
+    mimeType: 'application/pdf',
+    mediaType: 'document'
+  };
 }
 
-async function createJpgZip(file: File, pageRange: string | null) {
+async function createJpgZip(file: File, pageRange: string | null): Promise<PdfOutput> {
   return withTempDir('savi-pdf-jpg-', async (dir) => {
     const inputPath = path.join(dir, `${sanitizeFileName(file.name)}.pdf`);
     await writeFormFile(file, inputPath);
-
     const pageCount = await getPdfPageCount(inputPath);
     const pages = parsePageRange(pageRange, pageCount);
-    if (!pages.length) {
-      throw new Error('Select at least one PDF page.');
-    }
-
+    if (!pages.length) throw new PdfInputError('Select at least one PDF page.');
+    if (pages.length > MAX_JPG_OUTPUT_PAGES) throw new PdfInputError(`Convert up to ${MAX_JPG_OUTPUT_PAGES} pages to JPG at once.`);
     const zip = new JSZip();
     const outDir = path.join(dir, 'jpg');
     await mkdir(outDir);
-
     for (const page of pages) {
       const prefix = path.join(outDir, `page-${String(page).padStart(3, '0')}`);
       await runCommand('pdftoppm', ['-jpeg', '-r', '180', '-f', String(page), '-l', String(page), inputPath, prefix]);
-
       const produced = (await readdir(outDir))
         .filter((name) => name.startsWith(`page-${String(page).padStart(3, '0')}-`) && name.endsWith('.jpg'))
         .sort()
         .at(0);
-
-      if (produced) {
-        zip.file(`savi-page-${String(page).padStart(3, '0')}.jpg`, await readFile(path.join(outDir, produced)));
-      }
+      if (produced) zip.file(`savi-page-${String(page).padStart(3, '0')}.jpg`, await readFile(path.join(outDir, produced)));
     }
-
-    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-    return binaryResponse(zipBuffer, `${sanitizeFileName(file.name)}-jpg-pages.zip`, 'application/zip');
+    const bytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    return { bytes, filename: `${sanitizeFileName(file.name)}-jpg-pages.zip`, mimeType: 'application/zip', mediaType: 'archive' };
   });
 }
 
-async function createExtractedImagesZip(file: File) {
+async function createExtractedImagesZip(file: File): Promise<PdfOutput> {
   return withTempDir('savi-pdf-images-', async (dir) => {
     const inputPath = path.join(dir, `${sanitizeFileName(file.name)}.pdf`);
     await writeFormFile(file, inputPath);
-
     const prefix = path.join(dir, 'extracted-image');
     await runCommand('pdfimages', ['-j', inputPath, prefix]);
-
     const imageFiles = (await readdir(dir))
       .filter((name) => name.startsWith('extracted-image-'))
       .filter((name) => /\.(jpg|jpeg|png|ppm|pbm)$/i.test(name))
       .sort();
-
-    if (!imageFiles.length) {
-      return NextResponse.json({ error: 'No embedded images were found in this PDF.' }, { status: 422 });
+    if (!imageFiles.length) throw new PdfInputError('No embedded images were found in this PDF.', 422);
+    if (imageFiles.length > MAX_EXTRACTED_IMAGES) {
+      throw new PdfInputError(`This PDF contains too many embedded images. Extract up to ${MAX_EXTRACTED_IMAGES} images at a time.`);
     }
-
     const zip = new JSZip();
     for (let index = 0; index < imageFiles.length; index += 1) {
       const name = imageFiles[index];
       const extension = path.extname(name).replace('.', '') || 'jpg';
       zip.file(`savi-extracted-image-${String(index + 1).padStart(3, '0')}.${extension}`, await readFile(path.join(dir, name)));
     }
-
-    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-    return binaryResponse(zipBuffer, `${sanitizeFileName(file.name)}-images.zip`, 'application/zip');
+    const bytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    return { bytes, filename: `${sanitizeFileName(file.name)}-images.zip`, mimeType: 'application/zip', mediaType: 'archive' };
   });
 }
 
-export async function POST(request: Request) {
+async function processPdf(action: PdfAction, files: File[], form: FormData): Promise<PdfOutput> {
+  if (action === 'merge_pdf') {
+    if (files.length < 2) throw new PdfInputError('Upload at least two PDFs to merge.');
+    return createMergedPdf(files);
+  }
+  const file = files[0];
+  if (action === 'organize_pdf' || action === 'split_pdf') {
+    let pagePlan = readPagePlan(form.get('pagePlan'));
+    const swapPages = action === 'organize_pdf' ? readSwapPages(form.get('swapPages')) : null;
+    if (swapPages && !pagePlan.length) {
+      const pageCount = await getValidatedPageCount(file);
+      if (swapPages[0] > pageCount || swapPages[1] > pageCount) {
+        throw new PdfInputError(`This PDF has ${pageCount} pages, so those page numbers cannot be swapped.`);
+      }
+      pagePlan = Array.from({ length: pageCount }, (_, index) => ({ pageNumber: index + 1, rotation: 0 }));
+      const firstIndex = swapPages[0] - 1;
+      const secondIndex = swapPages[1] - 1;
+      [pagePlan[firstIndex], pagePlan[secondIndex]] = [pagePlan[secondIndex], pagePlan[firstIndex]];
+    }
+    return createPagePlanPdf(file, pagePlan, action === 'split_pdf' ? 'split' : 'organize');
+  }
+  if (action === 'pdf_to_jpg') return createJpgZip(file, typeof form.get('pages') === 'string' ? String(form.get('pages')) : 'all');
+  return createExtractedImagesZip(file);
+}
+
+export async function POST(request: NextRequest) {
+  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  if (!session) return NextResponse.json({ error: 'Please sign in before using this tool.', category: 'AUTH_REQUIRED' }, { status: 401 });
+
   try {
     const form = await request.formData();
-    const action = readAction(form.get('action'));
-
-    if (!action) {
-      return NextResponse.json({ error: 'Choose a valid PDF tool.' }, { status: 400 });
+    const action = typeof form.get('action') === 'string' ? String(form.get('action')) : undefined;
+    if (!isPdfAction(action)) throw new PdfInputError('Choose a valid PDF tool.');
+    const submittedFiles = form.getAll('files');
+    if (submittedFiles.some((file) => !isPdfFile(file))) {
+      throw new PdfInputError('Use PDF files only.');
     }
-
-    const files = form.getAll('files').filter(isPdfFile);
-    if (!files.length) {
-      return NextResponse.json({ error: 'Upload at least one PDF file.' }, { status: 400 });
-    }
-
-    if (files.length > MAX_FILES) {
-      return NextResponse.json({ error: `You can process up to ${MAX_FILES} PDFs at once.` }, { status: 400 });
-    }
-
-    if (files.some((file) => file.size > MAX_FILE_SIZE)) {
-      return NextResponse.json({ error: 'One of the PDFs is too large. Please use files under 100MB.' }, { status: 413 });
-    }
-
-    if (action === 'merge_pdf') {
-      if (files.length < 2) {
-        return NextResponse.json({ error: 'Upload at least two PDFs to merge.' }, { status: 400 });
+    const files = submittedFiles as File[];
+    const pageCount = await validateFiles(files);
+    const clientRequestId = typeof form.get('clientRequestId') === 'string' ? String(form.get('clientRequestId')) : '';
+    const result = await runProtectedOperation({
+      user: session,
+      clientRequestId,
+      toolId: action,
+      provider: SAVI_LOCAL_PDF_PROVIDER,
+      model: SAVI_LOCAL_PDF_MODEL,
+      operation: 'document_local',
+      pricingInput: { pageCount },
+      pricingOutput: {},
+      mediaType: action === 'pdf_to_jpg' || action === 'extract_images' ? 'archive' : 'document',
+      generate: async () => {
+        const output = await processPdf(action, files, form);
+        return { ...output, metadata: { pageCount, processing: 'local_pdf' } };
       }
-
-      const merged = await createMergedPdf(files);
-      return binaryResponse(merged, 'savi-merged.pdf', 'application/pdf');
+    });
+    if (result.state === 'processing') {
+      return NextResponse.json({ status: 'processing', jobId: result.jobId, availableCredits: result.availableCredits }, { status: 202 });
     }
-
-    const [file] = files;
-
-    if (action === 'organize_pdf' || action === 'split_pdf') {
-      const pagePlan = readPagePlan(form.get('pagePlan'));
-      const swapPages = readSwapPages(form.get('swapPages'));
-      const output = await createPagePlanPdf(file, pagePlan, action === 'split_pdf' ? 'split' : 'organize', swapPages);
-      const suffix = action === 'split_pdf' ? 'selected-pages' : 'organized';
-      return binaryResponse(output, `${sanitizeFileName(file.name)}-${suffix}.pdf`, 'application/pdf');
-    }
-
-    if (action === 'pdf_to_jpg') {
-      return createJpgZip(file, typeof form.get('pages') === 'string' ? String(form.get('pages')) : 'all');
-    }
-
-    if (action === 'extract_images') {
-      return createExtractedImagesZip(file);
-    }
-
-    return NextResponse.json({ error: 'Unsupported action.' }, { status: 400 });
+    return NextResponse.json({
+      asset: `/api/assets/${result.assetId}`,
+      assetId: result.assetId,
+      jobId: result.jobId,
+      filename: result.filename,
+      mediaType: result.mediaType,
+      availableCredits: result.availableCredits
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'PDF processing failed.';
-    console.error('PDF processing failed', error);
-    return NextResponse.json({ error: message || 'PDF processing failed.' }, { status: 500 });
+    if (error instanceof SaviInfrastructureError) return NextResponse.json({ error: error.message, category: error.category }, { status: error.status });
+    if (error instanceof PdfInputError) return NextResponse.json({ error: error.message, category: 'INVALID_INPUT' }, { status: error.status });
+    return NextResponse.json({ error: 'SAVI could not process this PDF. Your credits were not used.', category: 'INTERNAL_ERROR' }, { status: 500 });
   }
 }

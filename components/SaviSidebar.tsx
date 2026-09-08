@@ -83,11 +83,11 @@ const toolItems: SidebarItem[] = [
 export function SaviSidebar({
   active = 'Ask AI',
   onOpenMode,
-  credits = 20000
+  credits
 }: {
   active?: SidebarActive;
   onOpenMode?: (mode: SidebarMode) => void;
-  credits?: number;
+  credits?: number | null;
 }) {
   const [chatSessions, setChatSessions] = useState<SidebarChatSession[]>([]);
   const [collapsed, setCollapsed] = useState(false);
@@ -260,9 +260,9 @@ export function SaviSidebar({
                   <div className="mb-2 rounded-2xl border border-white/8 bg-white/[0.035] px-3 py-2.5">
                     <p className="truncate text-[13px] font-semibold text-white">{user.name}</p>
                     <p className="mt-0.5 truncate text-[11px] text-white/38">{user.email}</p>
-                    <p className="mt-2 text-[11px] font-semibold text-violet-200">{credits.toLocaleString()} credits</p>
+                    <p className="mt-2 text-[11px] font-semibold text-violet-200">{formatCredits(credits)}</p>
                   </div>
-                  <ProfileMenuLink href="/credits" label="Credits" hint="Plans and balance" icon={<CreditIcon />} active={active === 'Credits'} />
+                  <ProfileMenuLink href="/credits" label="Credits" hint="Authoritative balance" icon={<CreditIcon />} active={active === 'Credits'} />
                   <ProfileMenuLink href="/settings" label="Settings" hint="Account and app" icon={<GearIcon />} active={active === 'Settings'} />
                   <button
                     type="button"
@@ -305,7 +305,7 @@ export function SaviSidebar({
             </span>
             <span className={`min-w-0 ${collapsed ? 'hidden' : 'block'}`}>
               <span className="block truncate text-[14px] font-semibold text-white/86">{user?.name || 'Sign in to SAVI'}</span>
-              <span className="block truncate text-[12px] text-white/38">{user ? `${credits.toLocaleString()} credits` : 'Save your workspace'}</span>
+              <span className="block truncate text-[12px] text-white/38">{user ? formatCredits(credits) : 'Save your workspace'}</span>
             </span>
           </button>
         </div>
@@ -335,6 +335,10 @@ export function SaviSidebar({
       </header>
     </>
   );
+}
+
+function formatCredits(credits: number | null | undefined) {
+  return typeof credits === 'number' ? `${credits.toLocaleString()} credits` : 'Credits unavailable';
 }
 
 function SidebarLink({

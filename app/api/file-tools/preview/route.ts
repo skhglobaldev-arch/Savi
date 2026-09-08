@@ -1,17 +1,25 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import path from 'node:path';
+import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import { renderPdfThumbnails, sanitizeFileName, withTempDir, writeFormFile } from '@/lib/pdf/serverTools';
 
 export const runtime = 'nodejs';
 
 const MAX_PREVIEW_PAGES = 80;
-const MAX_FILE_SIZE = 80 * 1024 * 1024;
+// Keep preview limits aligned with the paid PDF route. A preview must not let a
+// caller upload a document that the protected processor will immediately deny.
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 function isPdfFile(value: FormDataEntryValue | null): value is File {
-  return value instanceof File && value.type === 'application/pdf';
+  return value instanceof File && (value.type === 'application/pdf' || value.name.toLowerCase().endsWith('.pdf'));
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  if (!session) {
+    return NextResponse.json({ error: 'Please sign in before previewing a PDF.', category: 'AUTH_REQUIRED' }, { status: 401 });
+  }
+
   try {
     const form = await request.formData();
     const file = form.get('file');
@@ -23,7 +31,7 @@ export async function POST(request: Request) {
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      return NextResponse.json({ error: 'This PDF is too large for preview right now. Please use a file under 80MB.' }, { status: 413 });
+      return NextResponse.json({ error: 'This PDF is too large for preview right now. Please use a file under 25MB.' }, { status: 413 });
     }
 
     return await withTempDir('savi-pdf-preview-', async (dir) => {

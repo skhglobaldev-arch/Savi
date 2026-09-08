@@ -1,7 +1,7 @@
 # These operations intentionally have no client access. SAVI executes them only
 # from a Next.js server after verifying its existing signed Google OAuth session.
 
-query FindSaviUserByProvider($provider: String!, $providerSubject: String!) {
+query FindSaviUserByProvider($provider: String!, $providerSubject: String!) @auth(level: NO_ACCESS) {
   saviUsers(where: { provider: { eq: $provider }, providerSubject: { eq: $providerSubject } }, limit: 1) {
     id
     provider
@@ -21,7 +21,7 @@ mutation CreateSaviUserAndAccount(
   $email: String!
   $displayName: String!
   $avatarUrl: String
-) @transaction {
+) @transaction @auth(level: NO_ACCESS) {
   saviUser_insert(data: {
     id: $userId
     provider: $provider
@@ -54,7 +54,7 @@ mutation CreateSaviUserAndAccountWithDevelopmentGrant(
   $avatarUrl: String
   $developmentCredits: Int!
   $metadata: String!
-) @transaction {
+) @transaction @auth(level: NO_ACCESS) {
   saviUser_insert(data: {
     id: $userId
     provider: $provider
@@ -89,7 +89,7 @@ mutation TouchSaviUser(
   $email: String!
   $displayName: String!
   $avatarUrl: String
-) {
+) @auth(level: NO_ACCESS) {
   saviUser_update(id: $userId, data: {
     email: $email
     displayName: $displayName
@@ -99,7 +99,7 @@ mutation TouchSaviUser(
   })
 }
 
-query GetCreditAccount($userId: UUID!) {
+query GetCreditAccount($userId: UUID!) @auth(level: NO_ACCESS) {
   creditAccounts(where: { userId: { eq: $userId } }, limit: 1) {
     id
     userId
@@ -108,7 +108,7 @@ query GetCreditAccount($userId: UUID!) {
   }
 }
 
-query FindGenerationJob($userId: UUID!, $clientRequestId: String!) {
+query FindGenerationJob($userId: UUID!, $clientRequestId: String!) @auth(level: NO_ACCESS) {
   generationJobs(where: { userId: { eq: $userId }, clientRequestId: { eq: $clientRequestId } }, limit: 1) {
     id
     userId
@@ -131,7 +131,7 @@ query FindGenerationJob($userId: UUID!, $clientRequestId: String!) {
   }
 }
 
-query GetGenerationJobForUser($userId: UUID!, $jobId: UUID!) {
+query GetGenerationJobForUser($userId: UUID!, $jobId: UUID!) @auth(level: NO_ACCESS) {
   generationJobs(where: { userId: { eq: $userId }, id: { eq: $jobId } }, limit: 1) {
     id
     userId
@@ -154,7 +154,7 @@ query GetGenerationJobForUser($userId: UUID!, $jobId: UUID!) {
   }
 }
 
-query GetAssetForUser($userId: UUID!, $assetId: UUID!) {
+query GetAssetForUser($userId: UUID!, $assetId: UUID!) @auth(level: NO_ACCESS) {
   assets(where: { userId: { eq: $userId }, id: { eq: $assetId } }, limit: 1) {
     id
     userId
@@ -171,7 +171,7 @@ query GetAssetForUser($userId: UUID!, $assetId: UUID!) {
   }
 }
 
-query GetAssetForJobForUser($userId: UUID!, $jobId: UUID!) {
+query GetAssetForJobForUser($userId: UUID!, $jobId: UUID!) @auth(level: NO_ACCESS) {
   assets(where: { userId: { eq: $userId }, jobId: { eq: $jobId } }, limit: 1) {
     id
     userId
@@ -201,7 +201,7 @@ mutation ReserveTextToImageJob(
   $credits: Int!
   $reservationLedgerAmount: Int!
   $metadata: String!
-) @transaction {
+) @transaction @auth(level: NO_ACCESS) {
   creditAccount_updateMany(
     where: { userId: { eq: $userId }, availableCredits: { ge: $credits } }
     data: {
@@ -267,7 +267,7 @@ mutation FinalizeTextToImageJob(
   $inputTokens: Int
   $outputTokens: Int
   $metadata: String!
-) @transaction {
+) @transaction @auth(level: NO_ACCESS) {
   query @check(expr: "response.query.creditReservations.size() == 1", message: "RESERVATION_NOT_ACTIVE") {
     creditReservations(where: {
       id: { eq: $reservationId }
@@ -362,7 +362,7 @@ mutation ReleaseTextToImageReservation(
   $inputTokens: Int
   $outputTokens: Int
   $metadata: String!
-) @transaction {
+) @transaction @auth(level: NO_ACCESS) {
   query @check(expr: "response.query.creditReservations.size() == 1", message: "RESERVATION_NOT_ACTIVE") {
     creditReservations(where: {
       id: { eq: $reservationId }
@@ -425,6 +425,317 @@ mutation ReleaseTextToImageReservation(
     type: "refund"
     amount: $releaseLedgerAmount
     reason: "text_to_image_reservation_released"
+    metadata: $metadata
+  })
+}
+
+# Generic protected-operation mutations. They use the same authoritative
+# account, reservation, job, asset, and usage tables as Text to Image, while
+# allowing another SAVI tool to retain its real tool/provider/media metadata.
+# These remain unavailable to ordinary Data Connect clients.
+
+mutation ReserveGenerationJob(
+  $jobId: UUID!
+  $reservationId: UUID!
+  $reservationTransactionId: UUID!
+  $reservationEventKey: String!
+  $userId: UUID!
+  $toolId: String!
+  $provider: String!
+  $model: String!
+  $clientRequestId: String!
+  $credits: Int!
+  $reservationLedgerAmount: Int!
+  $reservationReason: String!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  creditAccount_updateMany(
+    where: { userId: { eq: $userId }, availableCredits: { ge: $credits } }
+    data: {
+      availableCredits_update: { dec: $credits }
+      reservedCredits_update: { inc: $credits }
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "INSUFFICIENT_CREDITS")
+  generationJob_insert(data: {
+    id: $jobId
+    userId: $userId
+    toolId: $toolId
+    provider: $provider
+    model: $model
+    status: "processing"
+    reservedCredits: $credits
+    finalCredits: 0
+    clientRequestId: $clientRequestId
+    retryCount: 0
+    startedAt_expr: "request.time"
+  })
+  creditReservation_insert(data: {
+    id: $reservationId
+    userId: $userId
+    jobId: $jobId
+    amount: $credits
+    status: "reserved"
+  })
+  creditTransaction_insert(data: {
+    id: $reservationTransactionId
+    eventKey: $reservationEventKey
+    userId: $userId
+    jobId: $jobId
+    reservationId: $reservationId
+    type: "reservation"
+    amount: $reservationLedgerAmount
+    reason: $reservationReason
+    metadata: $metadata
+  })
+}
+
+mutation FinalizeGenerationJob(
+  $jobId: UUID!
+  $reservationId: UUID!
+  $chargeTransactionId: UUID!
+  $chargeEventKey: String!
+  $assetId: UUID!
+  $usageId: UUID!
+  $userId: UUID!
+  $toolId: String!
+  $provider: String!
+  $model: String!
+  $mediaType: String!
+  $credits: Int!
+  $chargeLedgerAmount: Int!
+  $chargeReason: String!
+  $providerRequestId: String
+  $usageMetadata: String
+  $assetStoragePath: String!
+  $assetFilename: String!
+  $assetMimeType: String!
+  $assetSizeBytes: Int
+  $resolution: String
+  $durationMs: Int
+  $inputReferenceCount: Int!
+  $imageCount: Int!
+  $inputTokens: Int
+  $outputTokens: Int
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  query @check(expr: "response.query.creditReservations.size() == 1", message: "RESERVATION_NOT_ACTIVE") {
+    creditReservations(where: {
+      id: { eq: $reservationId }
+      userId: { eq: $userId }
+      jobId: { eq: $jobId }
+      status: { eq: "reserved" }
+    }, limit: 1) {
+      id
+    }
+  }
+  creditReservation_updateMany(
+    where: { id: { eq: $reservationId }, status: { eq: "reserved" } }
+    data: { status: "finalized", finalizedAt_expr: "request.time" }
+  ) @check(expr: "this == 1", message: "RESERVATION_NOT_ACTIVE")
+  creditAccount_updateMany(
+    where: { userId: { eq: $userId }, reservedCredits: { ge: $credits } }
+    data: { reservedCredits_update: { dec: $credits }, updatedAt_expr: "request.time" }
+  ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_MISMATCH")
+  generationJob_updateMany(
+    where: { id: { eq: $jobId }, userId: { eq: $userId }, status: { eq: "processing" } }
+    data: {
+      status: "completed"
+      finalCredits: $credits
+      providerRequestId: $providerRequestId
+      usageMetadata: $usageMetadata
+      completedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "JOB_NOT_PROCESSING")
+  asset_insert(data: {
+    id: $assetId
+    userId: $userId
+    jobId: $jobId
+    toolId: $toolId
+    mediaType: $mediaType
+    mimeType: $assetMimeType
+    storagePath: $assetStoragePath
+    filename: $assetFilename
+    sizeBytes: $assetSizeBytes
+    status: "available"
+    creditCost: $credits
+  })
+  aiUsage_insert(data: {
+    id: $usageId
+    userId: $userId
+    jobId: $jobId
+    toolId: $toolId
+    provider: $provider
+    model: $model
+    inputReferenceCount: $inputReferenceCount
+    imageCount: $imageCount
+    resolution: $resolution
+    durationMs: $durationMs
+    retryCount: 0
+    success: true
+    providerRequestId: $providerRequestId
+    inputTokens: $inputTokens
+    outputTokens: $outputTokens
+    creditsReserved: $credits
+    creditsCharged: $credits
+    creditsReleased: 0
+    metadata: $metadata
+  })
+  creditTransaction_insert(data: {
+    id: $chargeTransactionId
+    eventKey: $chargeEventKey
+    userId: $userId
+    jobId: $jobId
+    reservationId: $reservationId
+    type: "generation_charge"
+    amount: $chargeLedgerAmount
+    reason: $chargeReason
+    metadata: $metadata
+  })
+}
+
+mutation ReleaseGenerationReservation(
+  $jobId: UUID!
+  $reservationId: UUID!
+  $releaseTransactionId: UUID!
+  $releaseEventKey: String!
+  $usageId: UUID!
+  $userId: UUID!
+  $toolId: String!
+  $provider: String!
+  $model: String!
+  $credits: Int!
+  $releaseLedgerAmount: Int!
+  $releaseReason: String!
+  $failureCategory: String!
+  $failureMessage: String!
+  $providerRequestId: String
+  $resolution: String
+  $durationMs: Int
+  $inputReferenceCount: Int!
+  $inputTokens: Int
+  $outputTokens: Int
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  query @check(expr: "response.query.creditReservations.size() == 1", message: "RESERVATION_NOT_ACTIVE") {
+    creditReservations(where: {
+      id: { eq: $reservationId }
+      userId: { eq: $userId }
+      jobId: { eq: $jobId }
+      status: { eq: "reserved" }
+    }, limit: 1) {
+      id
+    }
+  }
+  creditReservation_updateMany(
+    where: { id: { eq: $reservationId }, status: { eq: "reserved" } }
+    data: { status: "released", releasedAt_expr: "request.time" }
+  ) @check(expr: "this == 1", message: "RESERVATION_NOT_ACTIVE")
+  creditAccount_updateMany(
+    where: { userId: { eq: $userId }, reservedCredits: { ge: $credits } }
+    data: {
+      availableCredits_update: { inc: $credits }
+      reservedCredits_update: { dec: $credits }
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_MISMATCH")
+  generationJob_updateMany(
+    where: { id: { eq: $jobId }, userId: { eq: $userId }, status: { eq: "processing" } }
+    data: {
+      status: "failed"
+      failureCategory: $failureCategory
+      failureMessage: $failureMessage
+      providerRequestId: $providerRequestId
+      failedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "JOB_NOT_PROCESSING")
+  aiUsage_insert(data: {
+    id: $usageId
+    userId: $userId
+    jobId: $jobId
+    toolId: $toolId
+    provider: $provider
+    model: $model
+    inputReferenceCount: $inputReferenceCount
+    imageCount: 0
+    resolution: $resolution
+    durationMs: $durationMs
+    retryCount: 0
+    success: false
+    providerRequestId: $providerRequestId
+    inputTokens: $inputTokens
+    outputTokens: $outputTokens
+    creditsReserved: $credits
+    creditsCharged: 0
+    creditsReleased: $credits
+    metadata: $metadata
+  })
+  creditTransaction_insert(data: {
+    id: $releaseTransactionId
+    eventKey: $releaseEventKey
+    userId: $userId
+    jobId: $jobId
+    reservationId: $reservationId
+    type: "refund"
+    amount: $releaseLedgerAmount
+    reason: $releaseReason
+    metadata: $metadata
+  })
+}
+
+mutation RecordFreeAiUsage(
+  $jobId: UUID!
+  $usageId: UUID!
+  $userId: UUID!
+  $clientRequestId: String!
+  $toolId: String!
+  $provider: String!
+  $model: String!
+  $providerRequestId: String
+  $resolution: String
+  $durationMs: Int
+  $inputReferenceCount: Int!
+  $imageCount: Int!
+  $inputTokens: Int
+  $outputTokens: Int
+  $success: Boolean!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  generationJob_insert(data: {
+    id: $jobId
+    userId: $userId
+    toolId: $toolId
+    provider: $provider
+    model: $model
+    status: "completed"
+    reservedCredits: 0
+    finalCredits: 0
+    clientRequestId: $clientRequestId
+    providerRequestId: $providerRequestId
+    retryCount: 0
+    usageMetadata: $metadata
+    startedAt_expr: "request.time"
+    completedAt_expr: "request.time"
+  })
+  aiUsage_insert(data: {
+    id: $usageId
+    userId: $userId
+    jobId: $jobId
+    toolId: $toolId
+    provider: $provider
+    model: $model
+    inputReferenceCount: $inputReferenceCount
+    imageCount: $imageCount
+    resolution: $resolution
+    durationMs: $durationMs
+    retryCount: 0
+    success: $success
+    providerRequestId: $providerRequestId
+    inputTokens: $inputTokens
+    outputTokens: $outputTokens
+    creditsReserved: 0
+    creditsCharged: 0
+    creditsReleased: 0
     metadata: $metadata
   })
 }

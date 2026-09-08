@@ -1,6 +1,6 @@
-# AI Workspace MVP
+# SAVI by SKH.GLOBAL
 
-Premium mock foundation for an AI utility workspace.
+SAVI is a private AI workspace for image, video, voice, PDF, and assistant workflows. Paid tools execute only through trusted server routes using the signed SAVI Google session.
 
 ## Run locally
 
@@ -9,34 +9,32 @@ npm install
 npm run dev
 ```
 
-Open:
+Open `http://localhost:3000`.
 
-```txt
-http://localhost:3000
-```
+## Production foundations
 
-## Important
+- Custom Google OAuth and signed SAVI sessions; Firebase Auth is not used.
+- Authoritative credit balances, reservations, final charges, releases, and idempotent jobs live in Firebase Data Connect.
+- Generated assets are stored at private, user-scoped Firebase Storage paths and served only through an owner-checked SAVI route.
+- Provider keys stay on the server. Browser clients never call providers or Data Connect directly.
+- Ask SAVI chat is free under server-side fair-use limits. Paid tools show only their SAVI credit quote before confirmation.
+- `SAVI_DEV_CREDIT_GRANT_ENABLED` is `false` by default. Do not enable it outside controlled local development.
 
-This version intentionally uses mocked AI responses and mocked credits only.
-No real API keys are included.
-
-API keys should later be added only in `.env.local`, never directly inside components or prompts.
+Copy `.env.example` to `.env.local` and add only server-side credentials. Never commit real secrets.
 
 ## Pages
 
-- `/` landing page
-- `/workspace` Ask Anything workspace
-- `/credits` mock plans/credits
-- `/settings` future integrations
+- `/` Ask SAVI landing workspace
+- `/workspace` Ask SAVI and focused tool workspaces
+- `/credits` authoritative account balance
+- `/settings` account and generation information
 
-## Future integrations
+## Validation before deployment
 
-- Firebase Auth
-- Firestore usage logs
-- Firebase Storage uploads
-- Gemini API server routes
-- iLovePDF server wrapper
-- Stripe checkout and webhooks
+```bash
+npx tsc --noEmit
+npm run build
+firebase dataconnect:compile --project savi-257e0
+```
 
-## Fix note
-This package marks the landing page as a Client Component because it renders interactive template cards. If you see older errors, delete `node_modules` and `package-lock.json`, then run `npm install` again.
+The Data Connect compile validates the schema and connector only. It does not deploy.

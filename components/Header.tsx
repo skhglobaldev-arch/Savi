@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { CreditBadge } from './CreditBadge';
 
-export function Header({ credits = 20000 }: { credits?: number }) {
+export function Header({ credits }: { credits?: number | null }) {
   return (
     <header className="sticky top-0 z-30 border-b border-white/10 bg-[#101012]/88 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">

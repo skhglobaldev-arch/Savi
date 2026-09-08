@@ -2,7 +2,7 @@
 
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 
-export function SaviAccountButton({ credits, className = '' }: { credits: number; className?: string }) {
+export function SaviAccountButton({ credits, className = '' }: { credits: number | null | undefined; className?: string }) {
   const { user, isLoading, signIn } = useSaviAuth();
 
   if (isLoading) {
@@ -30,7 +30,7 @@ export function SaviAccountButton({ credits, className = '' }: { credits: number
       </span>
       <span className="min-w-0 truncate text-xs font-medium text-white/84">{user.name}</span>
       <span className="h-4 w-px bg-white/12" />
-      <span className="text-[11px] font-semibold text-violet-200">{credits.toLocaleString()}</span>
+      <span className="text-[11px] font-semibold text-violet-200">{typeof credits === 'number' ? credits.toLocaleString() : '—'}</span>
     </div>
   );
 }

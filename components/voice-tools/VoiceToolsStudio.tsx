@@ -1,16 +1,22 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { UpgradeModal } from '@/components/UpgradeModal';
 import { ToolPreview } from '@/components/ToolPreview';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
+import { createSaviRadioScript, type SaviRadioFormat, type SaviRadioLength } from '@/lib/voice/radioScript';
+import {
+  applyAuthoritativeBalance,
+  clearSaviClientRequestId,
+  createSaviClientRequestId,
+  createSaviRequestScope
+} from '@/lib/savi/clientGeneration';
 
 type VoiceMode = 'tts' | 'radio';
 type ToneId = 'natural' | 'warm' | 'excited' | 'formal' | 'whisper' | 'cinematic';
-type RadioFormatId = 'solo' | 'news' | 'podcast' | 'story';
-type RadioLengthId = 'short' | 'standard' | 'long';
+type RadioFormatId = SaviRadioFormat;
+type RadioLengthId = SaviRadioLength;
 
 const voices = [
   { id: 'kore', name: 'Kore', feel: 'Warm female narrator' },
@@ -39,10 +45,10 @@ const radioFormats: Array<{ id: RadioFormatId; label: string; note: string }> = 
   { id: 'story', label: 'Story show', note: 'Narrative radio episode' }
 ];
 
-const radioLengths: Array<{ id: RadioLengthId; label: string; cost: number; target: string }> = [
-  { id: 'short', label: 'Short', cost: 120, target: '45 to 60 seconds' },
-  { id: 'standard', label: 'Standard', cost: 220, target: '1 to 2 minutes' },
-  { id: 'long', label: 'Long', cost: 380, target: '3 to 4 minutes' }
+const radioLengths: Array<{ id: RadioLengthId; label: string; target: string }> = [
+  { id: 'short', label: 'Short', target: '45 to 60 seconds' },
+  { id: 'standard', label: 'Standard', target: '1 to 2 minutes' },
+  { id: 'long', label: 'Long', target: '3 to 4 minutes' }
 ];
 
 const CLOSE_ACTIVE_TOOL_EVENT = 'savi-close-active-tool';
@@ -53,81 +59,6 @@ const samples = [
   'Create a calm product intro for a premium AI workspace.',
   'Read this paragraph with confidence, warmth, and a natural pace.'
 ];
-
-function getTtsCost(length: number) {
-  if (length <= 1000) return 30;
-  if (length <= 5000) return 150;
-  if (length <= 10000) return 300;
-  return 700;
-}
-
-function createRadioScript(topic: string, format: RadioFormatId, length: RadioLengthId) {
-  const cleanTopic = topic.trim() || 'how AI can help people turn messy ideas into useful outputs';
-  const isPersian = /[\u0600-\u06FF]/.test(cleanTopic);
-
-  if (isPersian) {
-    const intro =
-      format === 'news'
-        ? 'سلام. این بخش خبری SAVI است؛ یک روایت روشن، کوتاه و کاربردی از موضوع امروز.'
-        : format === 'podcast'
-          ? 'به SAVI Radio خوش آمدید. امروز قرار است یک ایده خام را آرام، قابل فهم و قابل اجرا باز کنیم.'
-          : format === 'story'
-            ? 'امشب در SAVI Radio از یک ایده ساده شروع می کنیم و آن را به یک مسیر عملی تبدیل می کنیم.'
-            : 'به SAVI Radio خوش آمدید. من میزبان شما هستم و این یک بخش کوتاه و کاربردی درباره ایده امروز است.';
-
-    const middle =
-      length === 'long'
-        ? '\n\nدر ادامه اگر بخواهیم این موضوع را برای یک برنامه بلندتر باز کنیم، باید چند مثال واقعی، یک گفت وگوی کوتاه فرضی، و در پایان سه قدم اجرایی مشخص اضافه کنیم؛ قدم اول شناخت مسئله، قدم دوم ساخت خروجی اولیه، و قدم سوم آماده کردن آن برای ارائه یا فروش.'
-        : length === 'standard'
-          ? '\n\nبرای اینکه این ایده فقط در حد حرف نماند، بهتر است یک نمونه کوچک از خروجی بسازیم، آن را با یک نفر واقعی تست کنیم، و بعد بر اساس بازخورد، نسخه بعدی را دقیق تر کنیم.'
-          : '';
-
-    const close =
-      format === 'news'
-        ? 'این بود خلاصه امروز از SAVI؛ کوتاه، شفاف و آماده برای اقدام بعدی.'
-        : 'این بود SAVI Radio؛ ایده را بردارید، شکلش بدهید و آن را به یک خروجی قابل استفاده تبدیل کنید.';
-
-    return `${intro}
-
-موضوع امروز این است: ${cleanTopic}
-
-نکته اصلی اینجاست: ارزش یک ایده فقط در خود ایده نیست؛ ارزش واقعی وقتی ساخته می شود که آن ایده به یک خروجی مشخص تبدیل شود. یعنی کاربر بداند چه چیزی مهم است، چه چیزی اضافه است، و قدم بعدی دقیقاً چیست.
-
-اگر این موضوع را به یک محصول قابل فروش تبدیل کنیم، باید اول مسئله را ساده تعریف کنیم، بعد یک نتیجه قابل لمس بسازیم، و در نهایت تجربه کاربر را آن قدر راحت کنیم که بدون سردرگمی به خروجی برسد.
-
-از نگاه SAVI، ابزار خوب نباید شلوغ و گیج کننده باشد. باید آرام، سریع و قابل کنترل باشد؛ طوری که کاربر حس کند همه چیز دم دست اوست و هر دستور مستقیم به یک نتیجه قابل استفاده می رسد.${middle}
-
-${close}`;
-  }
-
-  const intro =
-    format === 'news'
-      ? 'Good evening. This is SAVI News Brief, bringing you a clear look at today\'s topic.'
-      : format === 'podcast'
-        ? 'Welcome back to SAVI Radio. Settle in, because today we are turning a rough idea into a useful conversation.'
-        : format === 'story'
-          ? 'Tonight on SAVI Radio, we open with a small idea that becomes a practical system.'
-          : 'Welcome back to SAVI Radio. I am your host, and this is your focused AI-powered segment.';
-
-  const close =
-    format === 'news'
-      ? 'That is your SAVI brief. Clear facts, useful context, and a practical next step.'
-      : 'This was SAVI Radio. Take the idea, shape it, and turn it into something useful.';
-
-  return `${intro}
-
-Today we are talking about: ${cleanTopic}
-
-First, here is the main idea. The value is not only in having information. The value is in turning information into a clear next action. SAVI should help the listener understand what matters, what can be ignored, and what should happen next.
-
-Second, let us make it practical. If this topic was a real project, the best output would include a short summary, a list of decisions, a useful script or plan, and a simple way to export or continue the work.
-
-Third, the human angle matters. Good AI tools should feel calm, fast, and easy. The user should never feel lost inside settings. The tool should guide them, but still leave them in control.
-
-${length === 'long' ? 'For a longer segment, we would add examples, a short interview-style exchange, and a final recap that turns the topic into three action steps.' : ''}
-
-${close}`;
-}
 
 function speak(text: string, tone: ToneId) {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
@@ -155,7 +86,7 @@ export function VoiceToolsStudio({
   template,
   templateLaunchKey = 0
 }: {
-  credits: number;
+  credits: number | null;
   onCreditsChange: (credits: number) => void;
   template?: TemplateItem;
   templateLaunchKey?: number;
@@ -171,15 +102,38 @@ export function VoiceToolsStudio({
   const [result, setResult] = useState('');
   const [audioUrl, setAudioUrl] = useState('');
   const [audioName, setAudioName] = useState('');
-  const [audioMode, setAudioMode] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
-  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [serverQuote, setServerQuote] = useState<number | null>(null);
 
   const selectedVoice = voices.find((item) => item.id === voice) ?? voices[0];
   const selectedTone = tones.find((item) => item.id === tone) ?? tones[0];
   const selectedLength = radioLengths.find((item) => item.id === radioLength) ?? radioLengths[0];
-  const cost = mode === 'radio' ? selectedLength.cost : getTtsCost(text.length);
+  const quoteLabel = serverQuote === null
+    ? user ? 'Price unavailable' : 'Sign in to view price'
+    : `${serverQuote} credits`;
+
+  useEffect(() => {
+    if (isAuthLoading || !user) {
+      setServerQuote(null);
+      return;
+    }
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      toolId: mode === 'radio' ? 'radio_talk' : 'text_to_speech',
+      textCharacters: String(Math.max(1, text.length))
+    });
+    void fetch(`/api/pricing/quote?${params.toString()}`, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      .then(async (response) => ({ response, data: await response.json().catch(() => ({})) as { credits?: unknown } }))
+      .then(({ response, data }) => {
+        if (response.ok && typeof data.credits === 'number') setServerQuote(data.credits);
+        else setServerQuote(null);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setServerQuote(null);
+      });
+    return () => controller.abort();
+  }, [isAuthLoading, mode, text.length, user?.id]);
 
   useEffect(() => {
     const closeActiveTool = () => {
@@ -200,7 +154,6 @@ export function VoiceToolsStudio({
       setResult('');
       setAudioUrl('');
       setAudioName('');
-      setAudioMode('');
       setError('');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -212,22 +165,25 @@ export function VoiceToolsStudio({
       setError(mode === 'radio' ? 'Write a topic or paste notes first.' : 'Write the text you want to turn into speech.');
       return;
     }
-    if (credits < cost) {
-      setShowUpgrade(true);
-      return;
-    }
     if (isAuthLoading) return;
     if (!user) {
       signIn();
       return;
     }
 
-    const nextResult = mode === 'radio' ? createRadioScript(text, radioFormat, radioLength) : text.trim();
+    const nextResult = mode === 'radio' ? createSaviRadioScript(text, radioFormat, radioLength) : text.trim();
+    const requestScope = createSaviRequestScope('voice-generate', [
+      mode,
+      nextResult,
+      selectedVoice.name,
+      selectedTone.label,
+      radioFormat,
+      radioLength
+    ]);
     setIsGenerating(true);
     setResult('');
     setAudioUrl('');
     setAudioName('');
-    setAudioMode('');
 
     try {
       const response = await fetch('/api/voice/radio', {
@@ -236,6 +192,8 @@ export function VoiceToolsStudio({
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+          toolId: mode === 'radio' ? 'radio_talk' : 'text_to_speech',
+          clientRequestId: createSaviClientRequestId(requestScope),
           script: nextResult,
           voice: selectedVoice.name,
           style:
@@ -247,18 +205,23 @@ export function VoiceToolsStudio({
       const data = (await response.json().catch(() => ({}))) as {
         audio?: string;
         filename?: string;
-        mode?: string;
         error?: string;
+        availableCredits?: number;
+        jobId?: string;
       };
 
+      if (response.status !== 202) clearSaviClientRequestId(requestScope);
+
       if (!response.ok || !data.audio) {
+        if (response.status === 202 && data.jobId) {
+          throw new Error('SAVI is still finishing this audio. Generate again in a moment to check the same safe request without a second charge.');
+        }
         throw new Error(data.error || 'Voice generation failed.');
       }
 
       setResult(nextResult);
       setAudioUrl(data.audio);
       setAudioName(data.filename || (mode === 'radio' ? 'savi-radio-talk.wav' : 'savi-text-to-speech.wav'));
-      setAudioMode(data.mode || 'gemini');
       recordMediaItem({
         type: 'audio',
         title: mode === 'radio' ? 'Radio Talk AI' : 'Text to Speech',
@@ -267,7 +230,7 @@ export function VoiceToolsStudio({
         filename: data.filename || (mode === 'radio' ? 'savi-radio-talk.wav' : 'savi-text-to-speech.wav'),
         text: nextResult
       });
-      onCreditsChange(credits - cost);
+      applyAuthoritativeBalance(data.availableCredits, onCreditsChange);
     } catch (voiceError) {
       setError(voiceError instanceof Error ? voiceError.message : 'Voice generation failed.');
     } finally {
@@ -311,7 +274,6 @@ export function VoiceToolsStudio({
               setResult('');
               setAudioUrl('');
               setAudioName('');
-              setAudioMode('');
               setError('');
             }}
             className={`rounded-[20px] px-4 py-3 text-left transition ${mode === item.id ? 'bg-violet-600 text-white shadow-[0_18px_40px_rgba(124,58,237,0.22)]' : 'text-slate-600 hover:bg-white'}`}
@@ -336,7 +298,7 @@ export function VoiceToolsStudio({
             className="min-h-[180px] w-full resize-none bg-transparent text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400"
           />
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-violet-100 pt-4">
-            <span className="text-xs font-bold text-slate-500">{text.length.toLocaleString()} characters · {cost} credits</span>
+            <span className="text-xs font-bold text-slate-500">{text.length.toLocaleString()} characters · {quoteLabel}</span>
             <button
               type="button"
               disabled={isGenerating}
@@ -400,7 +362,7 @@ export function VoiceToolsStudio({
               {radioLengths.map((item) => (
                 <button key={item.id} type="button" onClick={() => setRadioLength(item.id)} className={`rounded-2xl border px-4 py-3 text-left text-sm ${radioLength === item.id ? 'border-blue-300 bg-blue-100 text-blue-950' : 'border-violet-100 bg-white/65 text-slate-600'}`}>
                   <strong>{item.label}</strong>
-                  <span className="mt-1 block text-xs opacity-70">{item.cost} credits</span>
+                  <span className="mt-1 block text-xs opacity-70">{item.target}</span>
                 </button>
               ))}
             </div>
@@ -450,7 +412,7 @@ export function VoiceToolsStudio({
             <div className="mt-4 rounded-[22px] border border-violet-100 bg-violet-50/80 p-4">
               <audio controls src={audioUrl} className="w-full" />
               <p className="mt-2 text-xs font-bold text-slate-500">
-                {audioName || 'savi-voice.wav'} {audioMode === 'local-preview' ? '- preview audio' : ''}
+                {audioName || 'savi-voice.wav'}
               </p>
             </div>
           )}
@@ -460,7 +422,6 @@ export function VoiceToolsStudio({
         </div>
       </div>
 
-      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
       </>
       )}
     </section>

@@ -1,14 +1,20 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
-import { UpgradeModal } from '@/components/UpgradeModal';
 import { ToolPreview } from '@/components/ToolPreview';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
+import {
+  applyAuthoritativeBalance,
+  clearSaviClientRequestId,
+  createSaviClientRequestId,
+  createSaviRequestScope,
+  readPrivateTextAsset,
+  revokeOwnedObjectUrl
+} from '@/lib/savi/clientGeneration';
 
-type FileToolId = 'merge' | 'organize' | 'jpg' | 'contract_summary' | 'explain_document' | 'translate_summary' | 'pdf_podcast';
-type ConversionMode = 'pages' | 'images';
+type FileToolId = 'merge' | 'organize' | 'jpg' | 'extract_images' | 'contract_summary' | 'explain_document' | 'translate_summary' | 'pdf_podcast';
 type OutputFile = { url: string; filename: string; label: string };
 
 type PreviewPage = {
@@ -48,7 +54,6 @@ const tools: Array<{
   title: string;
   description: string;
   promptPlaceholder: string;
-  cost: number;
   group: 'PDF tools' | 'AI document';
 }> = [
   {
@@ -56,7 +61,6 @@ const tools: Array<{
     title: 'Merge PDF',
     description: 'Upload multiple PDFs, reorder them, then export one clean PDF.',
     promptPlaceholder: 'Example: Put the signed contract first, then the invoice, then the appendix. Keep the file name clear and ready to send.',
-    cost: 25,
     group: 'PDF tools'
   },
   {
@@ -64,15 +68,20 @@ const tools: Array<{
     title: 'Organize pages',
     description: 'Preview pages, drag to reorder, rotate, remove, or export selected pages.',
     promptPlaceholder: 'Example: Swap page 1 and page 2, rotate page 3 clockwise, remove blank pages, then export one clean PDF.',
-    cost: 35,
     group: 'PDF tools'
   },
   {
     id: 'jpg',
     title: 'PDF to JPG',
-    description: 'Choose exact pages to convert or extract embedded images into a ZIP.',
-    promptPlaceholder: 'Example: Convert pages 1, 3, and 4 to high-quality JPG files, or extract every embedded image into one ZIP.',
-    cost: 45,
+    description: 'Choose exact PDF pages and export them as high-quality JPG files in one ZIP.',
+    promptPlaceholder: 'Example: Convert pages 1, 3, and 4 to high-quality JPG files in one ZIP, ready to share.',
+    group: 'PDF tools'
+  },
+  {
+    id: 'extract_images',
+    title: 'Extract PDF images',
+    description: 'Pull the original embedded images from a PDF into one downloadable ZIP.',
+    promptPlaceholder: 'Example: Extract every original image embedded in this PDF and package them in one ZIP file.',
     group: 'PDF tools'
   },
   {
@@ -80,7 +89,6 @@ const tools: Array<{
     title: 'Summarize this contract',
     description: 'Upload a contract and get key points, risks, obligations, and next actions.',
     promptPlaceholder: 'Example: Summarize this contract in plain language. Highlight payment terms, deadlines, cancellation terms, risks, and what I should check before signing.',
-    cost: 5,
     group: 'AI document'
   },
   {
@@ -88,7 +96,6 @@ const tools: Array<{
     title: 'Explain this document simply',
     description: 'Upload a PDF and turn complicated content into beginner-friendly notes.',
     promptPlaceholder: 'Example: Explain this document like I am new to the topic. Tell me what it means, what matters, and what I should do next.',
-    cost: 4,
     group: 'AI document'
   },
   {
@@ -96,7 +103,6 @@ const tools: Array<{
     title: 'Translate PDF and summarize it',
     description: 'Upload a PDF, translate the main content, and get a clear summary.',
     promptPlaceholder: 'Example: Translate the important parts into Persian, then give me a short summary, key decisions, and any names, dates, or prices.',
-    cost: 7,
     group: 'AI document'
   },
   {
@@ -104,7 +110,6 @@ const tools: Array<{
     title: 'Turn PDF into podcast',
     description: 'Upload a PDF and create a radio-style podcast script from its key points.',
     promptPlaceholder: 'Example: Turn this PDF into a 2-minute radio podcast script with a warm intro, three clear talking points, and a practical ending.',
-    cost: 8,
     group: 'AI document'
   }
 ];
@@ -117,7 +122,6 @@ const templateToFileTool: Record<string, FileToolId> = {
 };
 
 const aiDocumentTools = new Set<FileToolId>(['contract_summary', 'explain_document', 'translate_summary', 'pdf_podcast']);
-const PODCAST_AUDIO_COST = 120;
 const CLOSE_ACTIVE_TOOL_EVENT = 'savi-close-active-tool';
 
 function makeId() {
@@ -132,90 +136,6 @@ function fileSizeLabel(size: number) {
 
 function isPdf(file: File) {
   return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-}
-
-function getDownloadName(response: Response, fallback: string) {
-  const header = response.headers.get('Content-Disposition') || '';
-  const match = header.match(/filename="([^"]+)"/);
-  return match?.[1] || fallback;
-}
-
-function buildAiDocumentResult(toolId: FileToolId, fileName: string, prompt: string) {
-  if (toolId === 'contract_summary') {
-    return `Contract summary ready for: ${fileName}
-
-Key points
-- Plain-language overview of what the contract is about.
-- Main parties, dates, responsibilities, and deliverables.
-- Payment terms, renewal terms, and cancellation points.
-
-Risks to check
-- Unclear obligations or missing deadlines.
-- Strong penalties, automatic renewal, or broad liability terms.
-- Any clause that needs legal review before signing.
-
-Next actions
-1. Review the risky clauses.
-2. Mark anything unclear.
-3. Ask for changes before approval.
-
-Instruction used:
-${prompt}`;
-  }
-
-  if (toolId === 'explain_document') {
-    return `Simple explanation ready for: ${fileName}
-
-What this document is saying
-- This section turns the document into simple everyday language.
-- Complicated wording is broken into short points.
-- Important ideas are separated from less important details.
-
-Main ideas
-1. What the document is about.
-2. Why it matters.
-3. What the reader should do next.
-
-Beginner-friendly version
-Imagine the document as a short guide. SAVI will explain the goal, the important parts, and the action steps without heavy wording.
-
-Instruction used:
-${prompt}`;
-  }
-
-  if (toolId === 'translate_summary') {
-    return `Translation and summary ready for: ${fileName}
-
-Translated summary
-- The main message of the document is translated into clear, natural language.
-- Important names, numbers, and dates are kept visible.
-- The final summary is short enough to scan quickly.
-
-Key takeaways
-1. Main topic.
-2. Important details.
-3. Recommended next action.
-
-Instruction used:
-${prompt}`;
-  }
-
-  return `Podcast script ready for: ${fileName}
-
-Intro
-Welcome back to SAVI Radio. Today we are turning this document into a clear, useful audio segment.
-
-Segment 1: What the document is about
-The host explains the main topic in simple language and gives listeners the context they need.
-
-Segment 2: Important points
-The host covers the strongest takeaways, useful details, and anything that deserves extra attention.
-
-Segment 3: Final recap
-The episode closes with a short summary and practical next steps.
-
-Instruction used:
-${prompt}`;
 }
 
 async function previewPdf(file: File, maxPages: number) {
@@ -314,7 +234,7 @@ export function FileToolsStudio({
   template,
   templateLaunchKey = 0
 }: {
-  credits: number;
+  credits: number | null;
   onCreditsChange: (credits: number) => void;
   template?: TemplateItem;
   templateLaunchKey?: number;
@@ -334,19 +254,89 @@ export function FileToolsStudio({
   const [podcastAudioUrl, setPodcastAudioUrl] = useState('');
   const [podcastAudioName, setPodcastAudioName] = useState('');
   const [podcastBusy, setPodcastBusy] = useState(false);
-  const [conversionMode, setConversionMode] = useState<ConversionMode>('pages');
   const [draggedFileIndex, setDraggedFileIndex] = useState<number | null>(null);
   const [draggedPageIndex, setDraggedPageIndex] = useState<number | null>(null);
   const [busyLabel, setBusyLabel] = useState('');
   const [error, setError] = useState('');
   const [output, setOutput] = useState<OutputFile | null>(null);
-  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [serverQuote, setServerQuote] = useState<number | null>(null);
+  const [splitQuote, setSplitQuote] = useState<number | null>(null);
+  const [podcastQuote, setPodcastQuote] = useState<number | null>(null);
   const workAreaRef = useRef<HTMLDivElement | null>(null);
 
   const selectedTool = tools.find((tool) => tool.id === activeTool) ?? tools[0];
   const selectedJpgPages = useMemo(() => jpgPages.filter((page) => page.selected), [jpgPages]);
   const selectedOrganizePages = useMemo(() => pageItems.filter((page) => page.selected), [pageItems]);
   const isBusy = Boolean(busyLabel);
+  const serverToolId = activeTool === 'merge' ? 'merge_pdf' : activeTool === 'organize' ? 'organize_pdf' : activeTool === 'jpg' ? 'pdf_to_jpg' : activeTool;
+  const quotedPageCount = activeTool === 'merge'
+    ? mergeFiles.reduce((total, item) => total + (item.pageCount || 0), 0)
+    : activeTool === 'organize'
+      ? pageFile?.pageCount || 1
+      : activeTool === 'jpg' || activeTool === 'extract_images'
+        ? jpgFile?.pageCount || 1
+        : aiFile?.pageCount || 1;
+  const quoteLabel = serverQuote === null
+    ? user ? 'Price unavailable' : 'Sign in to view price'
+    : `${serverQuote} credits`;
+
+  useEffect(() => {
+    if (isAuthLoading || !user) {
+      setServerQuote(null);
+      return;
+    }
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      toolId: serverToolId,
+      pageCount: String(Math.max(1, quotedPageCount)),
+      textCharacters: String(Math.max(1, aiPrompt.length))
+    });
+    void fetch(`/api/pricing/quote?${params.toString()}`, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      .then(async (response) => ({ response, data: await response.json().catch(() => ({})) as { credits?: unknown } }))
+      .then(({ response, data }) => {
+        if (response.ok && typeof data.credits === 'number') setServerQuote(data.credits);
+        else setServerQuote(null);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setServerQuote(null);
+      });
+    return () => controller.abort();
+  }, [aiPrompt.length, isAuthLoading, quotedPageCount, serverToolId, user?.id]);
+
+  useEffect(() => {
+    if (isAuthLoading || !user || activeTool !== 'organize') {
+      setSplitQuote(null);
+      return;
+    }
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      toolId: 'split_pdf',
+      pageCount: String(Math.max(1, pageFile?.pageCount || 1))
+    });
+    void fetch(`/api/pricing/quote?${params.toString()}`, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      .then(async (response) => ({ response, data: await response.json().catch(() => ({})) as { credits?: unknown } }))
+      .then(({ response, data }) => setSplitQuote(response.ok && typeof data.credits === 'number' ? data.credits : null))
+      .catch(() => {
+        if (!controller.signal.aborted) setSplitQuote(null);
+      });
+    return () => controller.abort();
+  }, [activeTool, isAuthLoading, pageFile?.pageCount, user?.id]);
+
+  useEffect(() => {
+    if (isAuthLoading || !user || !aiResult.trim()) {
+      setPodcastQuote(null);
+      return;
+    }
+    const controller = new AbortController();
+    const params = new URLSearchParams({ toolId: 'radio_talk', textCharacters: String(aiResult.length) });
+    void fetch(`/api/pricing/quote?${params.toString()}`, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      .then(async (response) => ({ response, data: await response.json().catch(() => ({})) as { credits?: unknown } }))
+      .then(({ response, data }) => setPodcastQuote(response.ok && typeof data.credits === 'number' ? data.credits : null))
+      .catch(() => {
+        if (!controller.signal.aborted) setPodcastQuote(null);
+      });
+    return () => controller.abort();
+  }, [aiResult.length, isAuthLoading, user?.id]);
 
   useEffect(() => {
     const closeActiveTool = () => {
@@ -366,7 +356,7 @@ export function FileToolsStudio({
   }, [template, templateLaunchKey]);
 
   function clearOutput() {
-    if (output?.url) URL.revokeObjectURL(output.url);
+    revokeOwnedObjectUrl(output?.url);
     setOutput(null);
   }
 
@@ -385,7 +375,6 @@ export function FileToolsStudio({
     setAiPages([]);
     setAiPrompt('');
     setAiResult('');
-    setConversionMode('pages');
     setDraggedFileIndex(null);
     setDraggedPageIndex(null);
     clearPodcastAudio();
@@ -400,14 +389,6 @@ export function FileToolsStudio({
     setError('');
     clearOutput();
     window.requestAnimationFrame(() => workAreaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-  }
-
-  function chargeOrOpenUpgrade(cost: number) {
-    if (credits < cost) {
-      setShowUpgrade(true);
-      return false;
-    }
-    return true;
   }
 
   async function addMergeFiles(files: File[]) {
@@ -539,7 +520,6 @@ export function FileToolsStudio({
       return;
     }
 
-    if (!chargeOrOpenUpgrade(selectedTool.cost)) return;
     if (isAuthLoading) return;
     if (!user) {
       signIn();
@@ -547,6 +527,13 @@ export function FileToolsStudio({
     }
 
     const finalPrompt = aiPrompt.trim() || selectedTool.description;
+    const requestScope = createSaviRequestScope('pdf-ai', [
+      activeTool,
+      finalPrompt,
+      aiFile.name,
+      aiFile.size,
+      aiFile.file.lastModified
+    ]);
     clearPodcastAudio();
     setAiResult('');
     setBusyLabel('Reading PDF with SAVI...');
@@ -556,26 +543,43 @@ export function FileToolsStudio({
       form.append('file', aiFile.file);
       form.append('toolId', activeTool);
       form.append('prompt', finalPrompt);
+      form.append('clientRequestId', createSaviClientRequestId(requestScope));
 
       const response = await fetch('/api/file-tools/ai', {
         method: 'POST',
         body: form
       });
-      const data = (await response.json().catch(() => ({}))) as { result?: string; error?: string };
+      const data = (await response.json().catch(() => ({}))) as {
+        result?: string;
+        asset?: string;
+        filename?: string;
+        availableCredits?: number;
+        error?: string;
+        jobId?: string;
+      };
 
-      if (!response.ok || !data.result) {
+      if (response.status !== 202) clearSaviClientRequestId(requestScope);
+
+      if (!response.ok || (!data.result && !data.asset)) {
+        if (response.status === 202 && data.jobId) {
+          throw new Error('SAVI is still finishing this document. Generate again in a moment to check the same safe request without a second charge.');
+        }
         throw new Error(data.error || 'AI document tool failed.');
       }
 
-      setAiResult(data.result);
+      const resultText = data.result || await readPrivateTextAsset(data.asset);
+      if (!resultText) throw new Error('SAVI could not load the document result.');
+
+      setAiResult(resultText);
       recordMediaItem({
         type: 'text',
         title: selectedTool.title,
         source: 'Files',
-        filename: `savi-${activeTool}.txt`,
-        text: data.result
+        url: data.asset,
+        filename: data.filename || `savi-${activeTool}.txt`,
+        text: resultText
       });
-      onCreditsChange(credits - selectedTool.cost);
+      applyAuthoritativeBalance(data.availableCredits, onCreditsChange);
     } catch (documentError) {
       setError(documentError instanceof Error ? documentError.message : 'AI document tool failed.');
     } finally {
@@ -589,7 +593,6 @@ export function FileToolsStudio({
       return;
     }
 
-    if (!chargeOrOpenUpgrade(PODCAST_AUDIO_COST)) return;
     if (isAuthLoading) return;
     if (!user) {
       signIn();
@@ -599,6 +602,7 @@ export function FileToolsStudio({
     setPodcastBusy(true);
     setError('');
     clearPodcastAudio();
+    const requestScope = createSaviRequestScope('pdf-podcast-audio', [aiResult, 'Puck', 'energetic, warm, radio podcast host']);
 
     try {
       const response = await fetch('/api/voice/radio', {
@@ -607,14 +611,21 @@ export function FileToolsStudio({
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+          toolId: 'radio_talk',
+          clientRequestId: createSaviClientRequestId(requestScope),
           script: aiResult,
           voice: 'Puck',
           style: 'energetic, warm, radio podcast host'
         })
       });
-      const data = (await response.json().catch(() => ({}))) as { audio?: string; filename?: string; error?: string };
+      const data = (await response.json().catch(() => ({}))) as { audio?: string; filename?: string; availableCredits?: number; error?: string; jobId?: string };
+
+      if (response.status !== 202) clearSaviClientRequestId(requestScope);
 
       if (!response.ok || !data.audio) {
+        if (response.status === 202 && data.jobId) {
+          throw new Error('SAVI is still finishing this podcast. Create it again in a moment to check the same safe request without a second charge.');
+        }
         throw new Error(data.error || 'Podcast audio generation failed.');
       }
 
@@ -628,7 +639,7 @@ export function FileToolsStudio({
         filename: data.filename || 'savi-radio-podcast.wav',
         text: aiResult
       });
-      onCreditsChange(credits - PODCAST_AUDIO_COST);
+      applyAuthoritativeBalance(data.availableCredits, onCreditsChange);
     } catch (podcastError) {
       setError(podcastError instanceof Error ? podcastError.message : 'Podcast audio generation failed.');
     } finally {
@@ -637,7 +648,6 @@ export function FileToolsStudio({
   }
 
   async function runProcess(action: 'merge_pdf' | 'organize_pdf' | 'split_pdf' | 'pdf_to_jpg' | 'extract_images') {
-    if (!chargeOrOpenUpgrade(selectedTool.cost)) return;
     if (isAuthLoading) return;
     if (!user) {
       signIn();
@@ -647,10 +657,19 @@ export function FileToolsStudio({
     clearOutput();
     setError('');
     setBusyLabel('Preparing files...');
+    const requestScope = createSaviRequestScope('pdf-process', [
+      action,
+      mergeFiles.map((item) => `${item.name}:${item.size}:${item.file.lastModified}`).join('|'),
+      pageFile ? `${pageFile.name}:${pageFile.size}:${pageFile.file.lastModified}` : '',
+      pageItems.map((item) => `${item.pageNumber}:${item.rotation}:${item.selected}`).join('|'),
+      jpgFile ? `${jpgFile.name}:${jpgFile.size}:${jpgFile.file.lastModified}` : '',
+      selectedJpgPages.map((item) => item.pageNumber).join(',')
+    ]);
 
     try {
       const form = new FormData();
       form.append('action', action);
+      form.append('clientRequestId', createSaviClientRequestId(requestScope));
 
       if (action === 'merge_pdf') {
         mergeFiles.filter((item) => item.status === 'ready').forEach((item) => form.append('files', item.file));
@@ -681,14 +700,23 @@ export function FileToolsStudio({
         body: form
       });
 
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
+      const data = (await response.json().catch(() => ({}))) as {
+        asset?: string;
+        filename?: string;
+        availableCredits?: number;
+        error?: string;
+        jobId?: string;
+      };
+      if (response.status !== 202) clearSaviClientRequestId(requestScope);
+      if (!response.ok || !data.asset) {
+        if (response.status === 202 && data.jobId) {
+          throw new Error('SAVI is still finishing this PDF. Run it again in a moment to check the same safe request without a second charge.');
+        }
         throw new Error(data.error || 'PDF tool failed.');
       }
 
-      const blob = await response.blob();
-      const filename = getDownloadName(response, action.includes('jpg') || action.includes('images') ? 'savi-output.zip' : 'savi-output.pdf');
-      const url = URL.createObjectURL(blob);
+      const filename = data.filename || (action.includes('jpg') || action.includes('images') ? 'savi-output.zip' : 'savi-output.pdf');
+      const url = data.asset;
       setOutput({
         url,
         filename,
@@ -701,7 +729,7 @@ export function FileToolsStudio({
         url,
         filename
       });
-      onCreditsChange(credits - selectedTool.cost);
+      applyAuthoritativeBalance(data.availableCredits, onCreditsChange);
     } catch (processError) {
       setError(processError instanceof Error ? processError.message : 'Something went wrong.');
     } finally {
@@ -776,7 +804,7 @@ export function FileToolsStudio({
         )}
 
         <ActionBar
-          cost={selectedTool.cost}
+          quote={serverQuote}
           credits={credits}
           disabled={isBusy || mergeFiles.filter((item) => item.status === 'ready').length < 2}
           loading={busyLabel}
@@ -899,7 +927,7 @@ export function FileToolsStudio({
         {renderPageGrid('organize')}
         <div className="grid gap-3 md:grid-cols-2">
           <ActionBar
-            cost={selectedTool.cost}
+            quote={serverQuote}
             credits={credits}
             disabled={isBusy || !pageFile || pageItems.length < 1}
             loading={busyLabel}
@@ -907,7 +935,7 @@ export function FileToolsStudio({
             onClick={() => runProcess('organize_pdf')}
           />
           <ActionBar
-            cost={selectedTool.cost}
+            quote={splitQuote}
             credits={credits}
             disabled={isBusy || !pageFile || selectedOrganizePages.length < 1}
             loading={busyLabel}
@@ -924,46 +952,55 @@ export function FileToolsStudio({
       <div className="space-y-5">
         <UploadDropzone
           title="Upload PDF for images"
-          description="Convert selected pages to JPG, or switch mode and extract original embedded images from the PDF."
+          description="Choose the exact pages you want SAVI to turn into high-quality JPG files."
           busy={isBusy}
           onFiles={(files) => loadPagePreview(files[0], 'jpg')}
         />
 
-        <div className="grid gap-2 rounded-[24px] border border-white/10 bg-white/[0.04] p-2 sm:grid-cols-2">
-          {[
-            { id: 'pages' as const, label: 'Pages to JPG', note: 'Choose exact PDF pages' },
-            { id: 'images' as const, label: 'Extract images', note: 'Pull original embedded images' }
-          ].map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              onClick={() => setConversionMode(item.id)}
-              className={`rounded-[20px] px-4 py-3 text-left transition ${
-                conversionMode === item.id ? 'bg-violet-600 text-white' : 'text-slate-600 hover:bg-white hover:text-violet-700'
-              }`}
-            >
-              <span className="block text-sm font-black">{item.label}</span>
-              <span className="mt-1 block text-xs opacity-70">{item.note}</span>
-            </button>
-          ))}
-        </div>
+        {renderPageGrid('jpg')}
 
-        {conversionMode === 'pages' ? renderPageGrid('jpg') : (
+        <ActionBar
+          quote={serverQuote}
+          credits={credits}
+          disabled={isBusy || !jpgFile || selectedJpgPages.length < 1}
+          loading={busyLabel}
+          label={`Create ZIP from ${selectedJpgPages.length || 0} pages`}
+          onClick={() => runProcess('pdf_to_jpg')}
+        />
+      </div>
+    );
+  }
+
+  function renderExtractImagesTool() {
+    return (
+      <div className="space-y-5">
+        <UploadDropzone
+          title="Upload PDF to extract images"
+          description="SAVI will preserve the original embedded images and package them in one downloadable ZIP."
+          busy={isBusy}
+          onFiles={(files) => loadPagePreview(files[0], 'jpg')}
+        />
+
+        {jpgFile && (
           <div className="rounded-[26px] border border-white/10 bg-black/25 p-5">
-            <h3 className="text-lg font-black">Extract embedded images</h3>
-            <p className="mt-2 text-sm leading-6 text-white/55">
-              SAVI will look inside the PDF and package the original embedded images into one downloadable ZIP.
+            <p className="truncate text-sm font-black text-white">{jpgFile.name}</p>
+            <p className="mt-1 text-sm leading-6 text-white/55">
+              {jpgFile.status === 'previewing'
+                ? 'Checking the PDF...'
+                : jpgFile.status === 'ready'
+                  ? `${jpgFile.pageCount || 0} pages ready. SAVI will extract original embedded images, not page screenshots.`
+                  : jpgFile.error || 'This PDF could not be opened.'}
             </p>
           </div>
         )}
 
         <ActionBar
-          cost={selectedTool.cost}
+          quote={serverQuote}
           credits={credits}
-          disabled={isBusy || !jpgFile || (conversionMode === 'pages' && selectedJpgPages.length < 1)}
+          disabled={isBusy || !jpgFile || jpgFile.status !== 'ready'}
           loading={busyLabel}
-          label={conversionMode === 'pages' ? `Create ZIP from ${selectedJpgPages.length || 0} pages` : 'Extract images as ZIP'}
-          onClick={() => runProcess(conversionMode === 'pages' ? 'pdf_to_jpg' : 'extract_images')}
+          label="Extract images as ZIP"
+          onClick={() => runProcess('extract_images')}
         />
       </div>
     );
@@ -1025,7 +1062,7 @@ export function FileToolsStudio({
             placeholder={selectedTool.promptPlaceholder}
           />
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-violet-100 pt-3">
-            <span className="text-xs font-black text-slate-500">{selectedTool.cost} credits</span>
+            <span className="text-xs font-black text-slate-500">{quoteLabel}</span>
             <button
               type="button"
               disabled={isBusy || !aiFile || aiFile.status !== 'ready'}
@@ -1070,16 +1107,16 @@ export function FileToolsStudio({
                   <div>
                     <p className="text-sm font-black text-slate-950">Create radio podcast audio</p>
                     <p className="mt-1 text-sm leading-6 text-slate-600">
-                      Uses SAVI Radio voice generation. Audio cost: <strong className="text-violet-700">{PODCAST_AUDIO_COST} credits</strong>.
+                      Uses SAVI Radio voice generation. Audio cost: <strong className="text-violet-700">{podcastQuote === null ? 'Price unavailable' : `${podcastQuote} credits`}</strong>.
                     </p>
                   </div>
                   <button
                     type="button"
-                    disabled={podcastBusy}
+                    disabled={podcastBusy || Boolean(user && podcastQuote === null)}
                     onClick={createRadioPodcastAudio}
                     className="rounded-full bg-violet-600 px-6 py-3 text-sm font-black text-white shadow-[0_16px_35px_rgba(124,58,237,0.22)] transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-55"
                   >
-                    {podcastBusy ? 'Creating podcast...' : `Create podcast - ${PODCAST_AUDIO_COST} credits`}
+                    {podcastBusy ? 'Creating podcast...' : podcastQuote === null ? 'Quote unavailable' : `Create podcast - ${podcastQuote} credits`}
                   </button>
                 </div>
 
@@ -1135,9 +1172,6 @@ export function FileToolsStudio({
               <span className="text-base font-black">{tool.title}</span>
               <span className="mt-2 block text-xs leading-5 text-white/52">{tool.description}</span>
               <ToolPreview previewId={tool.id} compact />
-              <span className="mt-3 inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-black text-cyan-100">
-                {tool.cost} credits
-              </span>
               <span className="ml-2 mt-3 inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-700">
                 {tool.group}
               </span>
@@ -1152,6 +1186,7 @@ export function FileToolsStudio({
         {activeTool === 'merge' && renderMergeTool()}
         {activeTool === 'organize' && renderOrganizeTool()}
         {activeTool === 'jpg' && renderJpgTool()}
+        {activeTool === 'extract_images' && renderExtractImagesTool()}
         {aiDocumentTools.has(activeTool) && renderAiDocumentTool()}
 
         {error && (
@@ -1178,7 +1213,6 @@ export function FileToolsStudio({
       </div>
       )}
 
-      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
     </section>
   );
 }
@@ -1190,28 +1224,33 @@ function normaliseClientRotation(rotation: number): PageItem['rotation'] {
 }
 
 function ActionBar({
-  cost,
+  quote,
   credits,
   disabled,
   loading,
   label,
   onClick
 }: {
-  cost: number;
-  credits: number;
+  quote: number | null;
+  credits: number | null;
   disabled?: boolean;
   loading?: string;
   label: string;
   onClick: () => void;
 }) {
+  const quoteLabel = quote === null ? 'Current price unavailable' : `${quote} credits`;
   return (
     <div className="rounded-[22px] border border-white/10 bg-white/[0.045] px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-xs font-black text-white/50">
-            {cost} credits
-            <span className="text-white/25"> / </span>
-            <span className={credits >= cost ? 'text-white/58' : 'text-red-200'}>{credits} available</span>
+            {quoteLabel}
+            {quote !== null && (
+              <>
+                <span className="text-white/25"> / </span>
+                <span className="text-white/58">{credits === null ? 'Balance unavailable' : `${credits} available`}</span>
+              </>
+            )}
           </p>
         </div>
         <button

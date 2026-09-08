@@ -103,8 +103,8 @@ const previewMap: Record<string, PreviewConfig> = {
   },
   variations: {
     kind: 'video',
-    title: 'Variations',
-    caption: 'One direction becomes multiple options.',
+    title: 'Create variation',
+    caption: 'One direction becomes a polished alternative.',
     media: '/previews/create-variations-preview.mp4'
   },
   merge: {
@@ -134,6 +134,16 @@ const previewMap: Record<string, PreviewConfig> = {
     slides: [
       { label: 'PDF' },
       { label: 'JPG 01' },
+      { label: 'ZIP' }
+    ]
+  },
+  extract_images: {
+    kind: 'pdf',
+    title: 'Extract PDF images',
+    caption: 'Keep original embedded images in one ZIP.',
+    slides: [
+      { label: 'PDF' },
+      { label: 'Images' },
       { label: 'ZIP' }
     ]
   },
@@ -193,15 +203,6 @@ const previewMap: Record<string, PreviewConfig> = {
     title: 'Story Sketch Video',
     caption: 'Plan a video sequence and generate it shot by shot.',
     media: '/previews/story-sketch-video-preview.mp4'
-  },
-  video_ad_script: {
-    kind: 'script',
-    title: 'Video ad script',
-    caption: 'Hook, scenes, voiceover, CTA.',
-    slides: [
-      { label: 'Campaign angle', text: 'Launch SAVI as the all-in-one workspace for turning ideas, files, and tasks into finished outputs.' },
-      { label: 'Ad script sample', text: 'Hook: Your ideas deserve more than scattered tabs.\nScene: chat, image, voice, PDF tools in one clean flow.\nCTA: Start with SAVI today.' }
-    ]
   },
   image_video: {
     kind: 'video',
@@ -302,15 +303,6 @@ const previewMap: Record<string, PreviewConfig> = {
       { label: 'After', text: 'Hi, could you please send this today if possible? We need it for the next production step. Thank you.' }
     ]
   },
-  'video-ad-script': {
-    kind: 'script',
-    title: 'Video ad script',
-    caption: 'Scenes, hook, voiceover, CTA.',
-    slides: [
-      { label: 'Skincare launch angle', text: 'A calming 8-second ad for SAVI Daily Hydration Cream, soft morning light, close-up texture, premium self-care mood.' },
-      { label: 'Scene script', text: '0:00 jar opens on warm wood.\n0:02 cream texture macro.\n0:05 model applies glow.\n0:07 logo and line: daily hydration, quietly premium.' }
-    ]
-  }
 };
 
 export function ToolPreview({ previewId, compact = false }: { previewId: string; compact?: boolean }) {
@@ -469,13 +461,21 @@ function SlidePreview({ compact, slides }: { compact: boolean; slides: NonNullab
           )}
           <div className="flex items-center justify-center gap-1.5">
             {previewItems.map((slide, index) => (
-              <button
-                key={`${slide.label}-dot-${index}`}
-                type="button"
-                aria-label={`Show ${slide.label}`}
-                onClick={() => setActiveIndex(index)}
-                className={`h-1.5 rounded-full transition ${index === activeIndex % previewItems.length ? 'w-5 bg-violet-600' : 'w-1.5 bg-violet-200'}`}
-              />
+              compact ? (
+                <span
+                  key={`${slide.label}-dot-${index}`}
+                  aria-hidden="true"
+                  className={`h-1.5 rounded-full transition ${index === activeIndex % previewItems.length ? 'w-5 bg-violet-600' : 'w-1.5 bg-violet-200'}`}
+                />
+              ) : (
+                <button
+                  key={`${slide.label}-dot-${index}`}
+                  type="button"
+                  aria-label={`Show ${slide.label}`}
+                  onClick={() => setActiveIndex(index)}
+                  className={`h-1.5 rounded-full transition ${index === activeIndex % previewItems.length ? 'w-5 bg-violet-600' : 'w-1.5 bg-violet-200'}`}
+                />
+              )
             ))}
           </div>
           {!compact && (
@@ -574,13 +574,21 @@ function PdfPreview({ compact, slides }: { compact: boolean; slides: NonNullable
       {visibleDocs.length > 1 && (
         <div className="mt-3 flex justify-center gap-1.5">
           {visibleDocs.map((doc, index) => (
-            <button
-              key={`${doc.label}-pdf-dot-${index}`}
-              type="button"
-              aria-label={`Show ${doc.label}`}
-              onClick={() => setActiveIndex(index)}
-              className={`h-1.5 rounded-full transition ${index === activeIndex % visibleDocs.length ? 'w-5 bg-violet-600' : 'w-1.5 bg-violet-200'}`}
-            />
+            compact ? (
+              <span
+                key={`${doc.label}-pdf-dot-${index}`}
+                aria-hidden="true"
+                className={`h-1.5 rounded-full transition ${index === activeIndex % visibleDocs.length ? 'w-5 bg-violet-600' : 'w-1.5 bg-violet-200'}`}
+              />
+            ) : (
+              <button
+                key={`${doc.label}-pdf-dot-${index}`}
+                type="button"
+                aria-label={`Show ${doc.label}`}
+                onClick={() => setActiveIndex(index)}
+                className={`h-1.5 rounded-full transition ${index === activeIndex % visibleDocs.length ? 'w-5 bg-violet-600' : 'w-1.5 bg-violet-200'}`}
+              />
+            )
           ))}
         </div>
       )}

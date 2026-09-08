@@ -5,13 +5,13 @@ import { AskSaviChat } from '@/components/AskSaviChat';
 import { AllMediaLibrary } from '@/components/AllMediaLibrary';
 import { CreditBadge } from '@/components/CreditBadge';
 import { SaviSidebar, type SidebarMode } from '@/components/SaviSidebar';
-import { UpgradeModal } from '@/components/UpgradeModal';
 import { SaviAccountButton } from '@/components/SaviAccountButton';
 import { FileToolsStudio } from '@/components/file-tools/FileToolsStudio';
 import { ImageToolsStudio } from '@/components/image-tools/ImageToolsStudio';
 import { VideoToolsStudio } from '@/components/video-tools/VideoToolsStudio';
 import { VoiceToolsStudio } from '@/components/voice-tools/VoiceToolsStudio';
 import type { ToolMode } from '@/components/ToolModeSelector';
+import { useAuthoritativeCredits } from '@/lib/savi/useAuthoritativeCredits';
 import { templates, type TemplateItem } from '@/lib/templates';
 
 const toolNavItems: Array<{ mode: ToolMode; label: string; short: string; hint: string }> = [
@@ -28,7 +28,6 @@ function getModeForTemplate(item: TemplateItem): ToolMode {
   if (['pdf-to-podcast', 'summarize-contract', 'explain-document', 'translate-pdf'].includes(item.id)) return 'Files';
   if (['instagram-from-image', 'product-photo-prompt'].includes(item.id)) return 'Images';
   if (item.id === 'blog-to-audio') return 'Voice';
-  if (item.id === 'video-ad-script') return 'Video';
   return 'Ask AI';
 }
 
@@ -43,13 +42,16 @@ function getWorkspaceLabel(mode: SidebarMode) {
 
 export default function WorkspacePage() {
   const initialRouteHandled = useRef(false);
-  const [credits, setCredits] = useState(20000);
+  const { credits, refresh: refreshCredits } = useAuthoritativeCredits();
   const [mode, setMode] = useState<SidebarMode>('Ask AI');
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateItem | undefined>();
   const [templateLaunchKey, setTemplateLaunchKey] = useState(0);
   const [initialAskMessage, setInitialAskMessage] = useState('');
   const [initialAskLaunchKey, setInitialAskLaunchKey] = useState(0);
-  const [showUpgrade, setShowUpgrade] = useState(false);
+
+  function handleCreditChange(_clientValue: number) {
+    void refreshCredits();
+  }
 
   useEffect(() => {
     if (initialRouteHandled.current || typeof window === 'undefined') return;
@@ -137,7 +139,7 @@ export default function WorkspacePage() {
   function renderStudio(tabMode: SidebarMode) {
     const studioProps = {
       credits,
-      onCreditsChange: setCredits,
+      onCreditsChange: handleCreditChange,
       template: selectedTemplate,
       templateLaunchKey
     };
@@ -194,7 +196,6 @@ export default function WorkspacePage() {
             </div>
           </div>
         </section>
-        <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
       </main>
     );
   }
@@ -207,7 +208,7 @@ export default function WorkspacePage() {
         <SaviAccountButton credits={credits} className="absolute right-4 top-[74px] z-30 lg:right-6 lg:top-5" />
         <AskSaviChat
           credits={credits}
-          onCreditsChange={setCredits}
+          onCreditsChange={handleCreditChange}
           onOpenTool={openToolTab}
           template={selectedTemplate}
           templateLaunchKey={templateLaunchKey}
@@ -215,7 +216,6 @@ export default function WorkspacePage() {
           initialMessageLaunchKey={initialAskLaunchKey}
         />
       </section>
-      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
     </main>
   );
 }

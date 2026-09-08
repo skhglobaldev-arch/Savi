@@ -11,9 +11,6 @@ export function TemplateCard({ item, onUse }: { item: TemplateItem; onUse: (item
           <p className="text-[10px] font-semibold uppercase text-white/36">{item.category}</p>
           <h3 className="mt-1.5 text-base font-semibold leading-snug text-white">{item.title}</h3>
         </div>
-        <span className="shrink-0 rounded-full border border-white/10 bg-white/8 px-2.5 py-1 text-[11px] font-semibold text-white/58">
-          {item.credits} credits
-        </span>
       </div>
       <ToolPreview previewId={item.id} compact />
       <p className="mt-3 min-h-[42px] text-xs leading-5 text-white/54">{item.description}</p>

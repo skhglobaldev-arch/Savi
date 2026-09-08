@@ -1,29 +1,25 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { OutputGallery, type OutputGalleryItem } from '@/components/OutputGallery';
 import { ToolSelect } from '@/components/ToolSelect';
-import { UpgradeModal } from '@/components/UpgradeModal';
 import { ToolPreview } from '@/components/ToolPreview';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
+import {
+  applyAuthoritativeBalance,
+  clearSaviClientRequestId,
+  createSaviClientRequestId,
+  createSaviRequestScope,
+  revokeOwnedObjectUrl
+} from '@/lib/savi/clientGeneration';
 
 type VideoToolId = 'text_video' | 'story_video' | 'image_video' | 'first_last' | 'product_ad' | 'social_reel' | 'extend';
-type ModelId = 'lite' | 'fast' | 'standard';
+type ModelId = 'omni';
 type DurationValue = '4' | '6' | '8';
 type RatioValue = '16:9' | '9:16';
-type QualityValue = '720' | '1080' | '4K';
-type LocalVideoPreview = {
-  toolTitle: string;
-  toolId: VideoToolId;
-  prompt: string;
-  duration: DurationValue;
-  ratio: RatioValue;
-  quality: QualityValue;
-  modelLabel: string;
-  withAudio: boolean;
-};
+type QualityValue = '720';
 
 type StoryVideoShot = {
   id: string;
@@ -47,7 +43,6 @@ const videoTools: Array<{
   description: string;
   promptPlaceholder: string;
   imageSlots: number;
-  cost: number;
   hiddenInstruction: string;
 }> = [
   {
@@ -56,7 +51,6 @@ const videoTools: Array<{
     description: 'Create a cinematic clip from a written idea.',
     promptPlaceholder: 'Example: A premium SAVI workspace comes alive on a glass desk, violet-blue glow, slow camera push-in, soft keyboard clicks, elegant launch mood.',
     imageSlots: 0,
-    cost: 900,
     hiddenInstruction: 'Generate a polished short video from text only with clear camera movement, subject, action, lighting, and audio direction.'
   },
   {
@@ -65,7 +59,6 @@ const videoTools: Array<{
     description: 'Build a video sequence shot by shot, then continue from the previous shot.',
     promptPlaceholder: 'Example: Shot 1 opens on a pomegranate tree at golden hour. Shot 2 follows the fruit falling. Shot 3 shows a child picking it up.',
     imageSlots: 0,
-    cost: 1300,
     hiddenInstruction: 'Create one short video shot in a consistent multi-shot story. Preserve visual continuity, camera language, lighting, subject identity, and narrative flow between shots.'
   },
   {
@@ -74,7 +67,6 @@ const videoTools: Array<{
     description: 'Animate a product, person, scene, or character from references.',
     promptPlaceholder: 'Example: Animate the uploaded product photo with a slow orbit, gentle light sweep, realistic reflections, and a clean final hero frame.',
     imageSlots: 3,
-    cost: 1200,
     hiddenInstruction: 'Use up to three reference images to preserve the subject, product, or character while animating the scene.'
   },
   {
@@ -83,7 +75,6 @@ const videoTools: Array<{
     description: 'Control the first and last frame for a guided visual transition.',
     promptPlaceholder: 'Example: Move naturally from the start frame to the end frame with the same subject, matching light, smooth camera movement, and no sudden style change.',
     imageSlots: 3,
-    cost: 1600,
     hiddenInstruction: 'Use the first image as the starting frame, the second image as the ending frame, and the optional third image as a style, subject, or product reference. Create a coherent transition.'
   },
   {
@@ -92,7 +83,6 @@ const videoTools: Array<{
     description: 'Create a short ad with product shots, motion, voice direction, and CTA.',
     promptPlaceholder: 'Example: Create an 8-second premium ad for this skincare jar: texture close-up, hand picks up product, soft water reflection, final clean beauty shot.',
     imageSlots: 3,
-    cost: 1400,
     hiddenInstruction: 'Use up to three references for the product, package, logo, or lifestyle scene. Build a premium product advertisement with clear hook, product reveal, benefit shot, and closing call to action.'
   },
   {
@@ -101,7 +91,6 @@ const videoTools: Array<{
     description: 'Vertical short-form content for Instagram, TikTok, or Shorts.',
     promptPlaceholder: 'Example: Make a fast vertical reel: first-second hook, three quick visual beats, bold readable caption rhythm, smooth product reveal, trendy clean energy.',
     imageSlots: 3,
-    cost: 1100,
     hiddenInstruction: 'Use up to three references for the subject, product, or visual direction. Create a punchy vertical reel with quick visual beats, captions, motion, hook, and a clear ending.'
   },
   {
@@ -110,20 +99,17 @@ const videoTools: Array<{
     description: 'Continue an existing generated video with a natural next action.',
     promptPlaceholder: 'Example: Continue the uploaded clip for 4 seconds with the same camera direction, lighting, and subject motion, ending on a calm polished final frame.',
     imageSlots: 3,
-    cost: 1500,
     hiddenInstruction: 'Use the uploaded video or image references to extend the previous video naturally. Continue the last movement and keep the style consistent.'
   }
 ];
 
-const modelOptions: Array<{ id: ModelId; label: string; note: string; multiplier: number }> = [
-  { id: 'lite', label: 'Lite', note: 'Fast drafts', multiplier: 1 },
-  { id: 'fast', label: 'Fast', note: 'Better motion', multiplier: 1.7 },
-  { id: 'standard', label: 'Standard', note: 'Studio quality', multiplier: 4 }
+const modelOptions: Array<{ id: ModelId; label: string; note: string }> = [
+  { id: 'omni', label: 'SAVI Video', note: 'Current server-rendered video output' }
 ];
 
 const durations: DurationValue[] = ['4', '6', '8'];
 const ratios: RatioValue[] = ['16:9', '9:16'];
-const qualities: QualityValue[] = ['720', '1080', '4K'];
+const qualities: QualityValue[] = ['720'];
 
 const promptIdeas: Record<VideoToolId, string[]> = {
   text_video: ['A cinematic AI workspace opening on a clean desk', 'A luxury product reveal with soft purple light', 'A calm founder story in a modern studio'],
@@ -135,9 +121,7 @@ const promptIdeas: Record<VideoToolId, string[]> = {
   extend: ['Continue the camera movement and reveal the final result', 'Extend with a slower ending and clean CTA', 'Keep the same subject and add a natural next action']
 };
 
-const templateToVideoTool: Record<string, VideoToolId> = {
-  'video-ad-script': 'product_ad'
-};
+const templateToVideoTool: Record<string, VideoToolId> = {};
 
 function getReferenceLabel(toolId: VideoToolId, index: number) {
   if (toolId === 'first_last') {
@@ -185,157 +169,25 @@ function createStoryVideoShot(updates: Partial<StoryVideoShot> = {}): StoryVideo
   };
 }
 
-function mediaReferenceFromDataUrl(mediaUrl?: string, name = 'previous-video-shot.mp4') {
-  if (!mediaUrl?.startsWith('data:')) return undefined;
-  const [header, data] = mediaUrl.split(',');
-  const mimeType = header.match(/^data:(.*?);base64$/)?.[1] || 'video/mp4';
-  if (!data) return undefined;
-  return { data, mimeType, name };
-}
-
-function wrapCanvasText(context: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number) {
-  const words = text.replace(/\s+/g, ' ').trim().split(' ');
-  const lines: string[] = [];
-  let line = '';
-
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (context.measureText(candidate).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-      if (lines.length === maxLines - 1) break;
-    } else {
-      line = candidate;
-    }
+async function mediaReferenceFromDataUrl(mediaUrl?: string, name = 'previous-video-shot.mp4') {
+  if (!mediaUrl) return undefined;
+  if (mediaUrl.startsWith('data:')) {
+    const [header, data] = mediaUrl.split(',');
+    const mimeType = header.match(/^data:(.*?);base64$/)?.[1] || 'video/mp4';
+    return data ? { data, mimeType, name } : undefined;
   }
-
-  if (line && lines.length < maxLines) lines.push(line);
-
-  lines.forEach((item, index) => {
-    context.fillText(item, x, y + index * lineHeight);
+  const response = await fetch(mediaUrl, { cache: 'no-store', credentials: 'same-origin' });
+  if (!response.ok) throw new Error('SAVI could not load the previous story video.');
+  const blob = await response.blob();
+  if (!blob.type.startsWith('video/')) throw new Error('The previous story asset is not a video.');
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('SAVI could not prepare the previous story video.'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(blob);
   });
-}
-
-function createLocalVideoPreview(request: LocalVideoPreview) {
-  return new Promise<{ url: string; filename: string }>((resolve, reject) => {
-    if (typeof document === 'undefined' || typeof MediaRecorder === 'undefined') {
-      reject(new Error('Video preview is not available in this browser.'));
-      return;
-    }
-
-    const canvas = document.createElement('canvas');
-    const isVertical = request.ratio === '9:16';
-    canvas.width = isVertical ? 720 : 1280;
-    canvas.height = isVertical ? 1280 : 720;
-
-    const context = canvas.getContext('2d') as CanvasRenderingContext2D | null;
-    if (!context) {
-      reject(new Error('Could not create video canvas.'));
-      return;
-    }
-    const ctx = context;
-
-    const stream = canvas.captureStream(24);
-    const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((item) => MediaRecorder.isTypeSupported(item));
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    const chunks: BlobPart[] = [];
-    const durationMs = Math.max(4, Math.min(Number(request.duration), 8)) * 1000;
-    const startedAt = performance.now();
-
-    recorder.ondataavailable = (event) => {
-      if (event.data.size) chunks.push(event.data);
-    };
-    recorder.onerror = () => {
-      stream.getTracks().forEach((track) => track.stop());
-      reject(new Error('Could not record the video preview.'));
-    };
-    recorder.onstop = () => {
-      stream.getTracks().forEach((track) => track.stop());
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      resolve({
-        url: URL.createObjectURL(blob),
-        filename: `savi-${request.toolId}-${request.duration}s-${request.quality}.webm`
-      });
-    };
-
-    function drawFrame(now: number) {
-      const progress = Math.min((now - startedAt) / durationMs, 1);
-      const width = canvas.width;
-      const height = canvas.height;
-      const glowX = width * (0.18 + progress * 0.64);
-      const glowY = height * (0.22 + Math.sin(progress * Math.PI) * 0.18);
-
-      const gradient = ctx.createLinearGradient(0, 0, width, height);
-      gradient.addColorStop(0, '#f8fafc');
-      gradient.addColorStop(0.42, '#ede9fe');
-      gradient.addColorStop(1, '#dbeafe');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, width, height);
-
-      const glow = ctx.createRadialGradient(glowX, glowY, 20, glowX, glowY, Math.min(width, height) * 0.52);
-      glow.addColorStop(0, 'rgba(124, 58, 237, 0.42)');
-      glow.addColorStop(0.55, 'rgba(56, 189, 248, 0.18)');
-      glow.addColorStop(1, 'rgba(56, 189, 248, 0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, width, height);
-
-      ctx.save();
-      ctx.translate(width * (0.5 + Math.sin(progress * Math.PI * 2) * 0.035), height * 0.5);
-      ctx.rotate((progress - 0.5) * 0.08);
-      ctx.fillStyle = 'rgba(255,255,255,0.72)';
-      ctx.strokeStyle = 'rgba(124,58,237,0.28)';
-      ctx.lineWidth = 3;
-      const cardW = width * 0.64;
-      const cardH = height * 0.46;
-      ctx.beginPath();
-      ctx.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 38);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-
-      ctx.fillStyle = '#4f46e5';
-      ctx.beginPath();
-      ctx.arc(width * (0.32 + progress * 0.08), height * 0.42, Math.min(width, height) * 0.07, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#0f172a';
-      ctx.font = `800 ${Math.round(width * 0.043)}px Inter, Arial, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('SAVI Video Preview', width / 2, height * 0.2);
-
-      ctx.fillStyle = '#475569';
-      ctx.font = `700 ${Math.round(width * 0.022)}px Inter, Arial, sans-serif`;
-      ctx.fillText(`${request.modelLabel} · ${request.duration}s · ${request.quality} · ${request.ratio}`, width / 2, height * 0.27);
-
-      ctx.fillStyle = '#111827';
-      ctx.font = `800 ${Math.round(width * 0.028)}px Inter, Arial, sans-serif`;
-      wrapCanvasText(ctx, request.toolTitle, width / 2, height * 0.45, width * 0.52, height * 0.055, 2);
-
-      ctx.fillStyle = '#334155';
-      ctx.font = `700 ${Math.round(width * 0.019)}px Inter, Arial, sans-serif`;
-      wrapCanvasText(ctx, request.prompt, width / 2, height * 0.58, width * 0.58, height * 0.038, 3);
-
-      ctx.fillStyle = 'rgba(124,58,237,0.92)';
-      const barWidth = width * 0.44 * progress;
-      ctx.beginPath();
-      ctx.roundRect(width * 0.28, height * 0.78, barWidth, height * 0.018, 10);
-      ctx.fill();
-
-      ctx.fillStyle = '#64748b';
-      ctx.font = `700 ${Math.round(width * 0.015)}px Inter, Arial, sans-serif`;
-      ctx.fillText(request.withAudio ? 'Audio direction included' : 'Silent visual preview', width / 2, height * 0.86);
-
-      if (progress < 1) {
-        requestAnimationFrame(drawFrame);
-        return;
-      }
-
-      setTimeout(() => recorder.stop(), 160);
-    }
-
-    recorder.start();
-    requestAnimationFrame(drawFrame);
-  });
+  const [, data = ''] = dataUrl.split(',');
+  return data ? { data, mimeType: blob.type || 'video/mp4', name } : undefined;
 }
 
 export function VideoToolsStudio({
@@ -344,7 +196,7 @@ export function VideoToolsStudio({
   template,
   templateLaunchKey = 0
 }: {
-  credits: number;
+  credits: number | null;
   onCreditsChange: (credits: number) => void;
   template?: TemplateItem;
   templateLaunchKey?: number;
@@ -353,7 +205,7 @@ export function VideoToolsStudio({
   const [toolId, setToolId] = useState<VideoToolId>('text_video');
   const [isToolOpen, setIsToolOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState<ModelId>('lite');
+  const [model, setModel] = useState<ModelId>('omni');
   const [duration, setDuration] = useState<DurationValue>('6');
   const [ratio, setRatio] = useState<RatioValue>('16:9');
   const [quality, setQuality] = useState<QualityValue>('720');
@@ -371,16 +223,37 @@ export function VideoToolsStudio({
   const [videoOutputs, setVideoOutputs] = useState<VideoStudioOutput[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
-  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [serverQuote, setServerQuote] = useState<number | null>(null);
   const workAreaRef = useRef<HTMLDivElement | null>(null);
 
   const selectedTool = videoTools.find((tool) => tool.id === toolId) ?? videoTools[0];
   const selectedModel = modelOptions.find((item) => item.id === model) ?? modelOptions[0];
-  const creditCost = useMemo(() => {
-    const durationMultiplier = duration === '8' ? 1.35 : duration === '4' ? 0.75 : 1;
-    const qualityMultiplier = quality === '4K' ? 2.6 : quality === '1080' ? 1.45 : 1;
-    return Math.ceil(selectedTool.cost * selectedModel.multiplier * durationMultiplier * qualityMultiplier);
-  }, [duration, quality, selectedModel.multiplier, selectedTool.cost, selectedTool.id]);
+  const quoteLabel = serverQuote === null
+    ? user ? 'Price unavailable' : 'Sign in to view price'
+    : `${serverQuote} credits`;
+
+  useEffect(() => {
+    if (isAuthLoading || !user) {
+      setServerQuote(null);
+      return;
+    }
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      toolId: selectedTool.id,
+      duration,
+      referenceImageCount: String(references.length)
+    });
+    void fetch(`/api/pricing/quote?${params.toString()}`, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal })
+      .then(async (response) => ({ response, data: await response.json().catch(() => ({})) as { credits?: unknown } }))
+      .then(({ response, data }) => {
+        if (response.ok && typeof data.credits === 'number') setServerQuote(data.credits);
+        else setServerQuote(null);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setServerQuote(null);
+      });
+    return () => controller.abort();
+  }, [duration, isAuthLoading, references.length, selectedTool.id, user?.id]);
 
   useEffect(() => {
     const closeActiveTool = () => {
@@ -399,11 +272,11 @@ export function VideoToolsStudio({
     selectVideoTool(nextTool, template.prompt);
     setRatio(nextTool === 'social_reel' ? '9:16' : '16:9');
     setDuration('6');
-    setModel('lite');
+    setModel('omni');
   }, [template, templateLaunchKey]);
 
   function clearGeneratedVideo() {
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    revokeOwnedObjectUrl(videoUrl);
     setVideoUrl('');
     setVideoName('');
   }
@@ -475,10 +348,6 @@ export function VideoToolsStudio({
       setError('Add both start and end frame images.');
       return;
     }
-    if (credits < creditCost) {
-      setShowUpgrade(true);
-      return;
-    }
     if (isAuthLoading) return;
     if (!user) {
       signIn();
@@ -491,7 +360,7 @@ export function VideoToolsStudio({
 
     const brief = [
       `Tool: ${selectedTool.title}`,
-      `Model direction: Veo 3.1 ${selectedModel.label}`,
+      `Output path: ${selectedModel.label}`,
       `Duration: ${duration}s`,
       `Ratio: ${ratio}`,
       `Quality: ${quality}`,
@@ -515,6 +384,15 @@ export function VideoToolsStudio({
       '- Avoid messy text unless captions are requested.',
       '- Preserve brand-safe, launch-ready pacing.'
     ].join('\n');
+    const requestScope = createSaviRequestScope('video-generate', [
+      selectedTool.id,
+      prompt.trim(),
+      ratio,
+      duration,
+      quality,
+      withAudio,
+      references.map((item) => `${item.name}:${item.file.size}:${item.file.lastModified}`).join('|')
+    ]);
 
     try {
       const referencePayload = await Promise.all(
@@ -537,12 +415,18 @@ export function VideoToolsStudio({
           duration,
           quality,
           withAudio,
-          references: referencePayload
+          references: referencePayload,
+          clientRequestId: createSaviClientRequestId(requestScope)
         })
       });
-      const data = (await response.json().catch(() => ({}))) as { video?: string; filename?: string; error?: string };
+      const data = (await response.json().catch(() => ({}))) as { video?: string; filename?: string; error?: string; availableCredits?: number; jobId?: string };
+
+      if (response.status !== 202) clearSaviClientRequestId(requestScope);
 
       if (!response.ok || !data.video) {
+        if (response.status === 202 && data.jobId) {
+          throw new Error('SAVI is still finishing this video. Generate again in a moment to check the same safe request without a second charge.');
+        }
         throw new Error(data.error || 'Video generation failed.');
       }
 
@@ -570,7 +454,7 @@ export function VideoToolsStudio({
         url: resultVideo,
         filename: resultFilename
       });
-      onCreditsChange(credits - creditCost);
+      applyAuthoritativeBalance(data.availableCredits, onCreditsChange);
     } catch (videoError) {
       setError(videoError instanceof Error ? videoError.message : 'Video generation failed.');
     } finally {
@@ -613,7 +497,6 @@ export function VideoToolsStudio({
 
       const next = createStoryVideoShot({
         parentVideoUrl: parent.videoUrl,
-        videoUrl: parent.videoUrl,
         placeholder: 'Example: Continue the action naturally, same camera and lighting, with the subject taking the next small step.'
       });
       const copy = [...current];
@@ -659,10 +542,6 @@ export function VideoToolsStudio({
       setError('Let the current shot finish first.');
       return;
     }
-    if (credits < creditCost) {
-      setShowUpgrade(true);
-      return;
-    }
     if (isAuthLoading) return;
     if (!user) {
       signIn();
@@ -673,7 +552,7 @@ export function VideoToolsStudio({
     updateStoryVideoShot(id, { isGenerating: true });
 
     try {
-      const parentReference = mediaReferenceFromDataUrl(shot.parentVideoUrl, 'previous-story-video-shot.mp4');
+      const parentReference = await mediaReferenceFromDataUrl(shot.parentVideoUrl, 'previous-story-video-shot.mp4');
       const finalPrompt = [
         shot.parentVideoUrl
           ? 'Continue from the previous generated video shot. Keep the same story world, visual style, camera language, subject continuity, and motion logic.'
@@ -685,6 +564,15 @@ export function VideoToolsStudio({
         `Audio: ${withAudio ? 'include natural ambience or useful sound direction' : 'silent visual shot only'}.`,
         `Shot prompt: ${shot.prompt.trim()}`
       ].join('\n\n');
+      const requestScope = createSaviRequestScope('story-video-shot', [
+        id,
+        finalPrompt,
+        ratio,
+        duration,
+        quality,
+        withAudio,
+        shot.parentVideoUrl || ''
+      ]);
 
       const response = await fetch('/api/video/generate', {
         method: 'POST',
@@ -698,16 +586,24 @@ export function VideoToolsStudio({
           duration,
           quality,
           withAudio,
-          references: parentReference ? [parentReference] : []
+          references: parentReference ? [parentReference] : [],
+          clientRequestId: createSaviClientRequestId(requestScope)
         })
       });
       const data = (await response.json().catch(() => ({}))) as {
         video?: string;
         filename?: string;
         error?: string;
+        availableCredits?: number;
+        jobId?: string;
       };
 
+      if (response.status !== 202) clearSaviClientRequestId(requestScope);
+
       if (!response.ok || !data.video) {
+        if (response.status === 202 && data.jobId) {
+          throw new Error('SAVI is still finishing this story shot. Generate again in a moment to check the same safe request without a second charge.');
+        }
         throw new Error(data.error || 'Story video shot generation failed.');
       }
       const resultVideo = data.video;
@@ -726,7 +622,7 @@ export function VideoToolsStudio({
         url: resultVideo,
         filename: resultFilename
       });
-      onCreditsChange(credits - creditCost);
+      applyAuthoritativeBalance(data.availableCredits, onCreditsChange);
     } catch (storyError) {
       updateStoryVideoShot(id, { isGenerating: false });
       setError(storyError instanceof Error ? storyError.message : 'Story video shot generation failed.');
@@ -780,7 +676,7 @@ export function VideoToolsStudio({
               </div>
             </div>
             <p className="mt-3 text-sm leading-6 text-slate-600">
-              Generate one short video at a time. Use Next shot to continue from the previous clip. Each shot costs <strong>{creditCost} credits</strong>.
+              Generate one short video at a time. Use Next shot to continue from the previous clip. Each shot uses the current server quote: <strong>{quoteLabel}</strong>.
             </p>
             <div className="mt-3 rounded-[22px] bg-violet-50 px-4 py-3 text-xs font-bold leading-5 text-violet-700">
               Best flow: write Shot 1, generate it, then click Next shot and describe the next action.
@@ -802,6 +698,7 @@ export function VideoToolsStudio({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {storyVideoShots.map((shot, index) => {
             const hasGeneratedVideo = Boolean(shot.videoUrl && !shot.parentVideoUrl);
+            const previewVideo = shot.videoUrl || shot.parentVideoUrl;
             const canGenerate = !shot.isGenerating && !storyVideoShots.some((item) => item.isGenerating) && shot.prompt.trim().length > 0;
 
             return (
@@ -825,8 +722,8 @@ export function VideoToolsStudio({
                 }`}
               >
                 <div className="relative aspect-video overflow-hidden rounded-[22px] border border-violet-100 bg-gradient-to-br from-violet-100 via-white to-blue-100">
-                  {shot.videoUrl ? (
-                    <video src={shot.videoUrl} controls={hasGeneratedVideo} muted={!hasGeneratedVideo} loop playsInline className={`h-full w-full object-cover ${shot.parentVideoUrl ? 'opacity-45' : ''}`} />
+                  {previewVideo ? (
+                    <video src={previewVideo} controls={hasGeneratedVideo} muted={!hasGeneratedVideo} loop playsInline className={`h-full w-full object-cover ${shot.parentVideoUrl && !shot.videoUrl ? 'opacity-45' : ''}`} />
                   ) : (
                     <div className="grid h-full place-items-center px-6 text-center text-sm font-bold text-slate-500">
                       {shot.parentVideoUrl ? 'Previous clip is ready. Describe the next moment.' : 'Describe and generate this video shot.'}
@@ -908,7 +805,6 @@ export function VideoToolsStudio({
             <span className="block font-black">{tool.title}</span>
             <span className="mt-2 block text-xs leading-5 opacity-75">{tool.description}</span>
             <ToolPreview previewId={tool.id} compact />
-            <span className="mt-3 inline-flex rounded-full bg-white/80 px-3 py-1 text-xs font-black text-violet-700">{tool.cost}+ credits</span>
           </button>
         ))}
       </div>
@@ -971,7 +867,7 @@ export function VideoToolsStudio({
               className="min-h-[165px] w-full resize-none bg-transparent text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400"
             />
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-violet-100 pt-3">
-              <span className="text-xs font-black text-slate-500">{creditCost} credits</span>
+              <span className="text-xs font-black text-slate-500">{quoteLabel}</span>
               <button
                 type="button"
                 disabled={isGenerating}
@@ -1032,7 +928,6 @@ export function VideoToolsStudio({
       </>
       )}
 
-      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
     </section>
   );
 }

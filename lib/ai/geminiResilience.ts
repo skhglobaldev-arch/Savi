@@ -23,8 +23,6 @@ export class GeminiUnavailableError extends Error {
   }
 }
 
-const DEFAULT_TEXT_FALLBACKS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
-
 function sleep(duration: number) {
   return new Promise((resolve) => setTimeout(resolve, duration));
 }
@@ -40,8 +38,7 @@ function messageFromUnknown(value: unknown) {
 }
 
 function configuredModels(models?: string[]) {
-  const primary = process.env.GEMINI_TEXT_MODEL || 'gemini-3.6-flash';
-  return [...(models || [primary, ...DEFAULT_TEXT_FALLBACKS])]
+  return [...(models || getConfiguredTextModels())]
     .map((model) => model.trim())
     .filter(Boolean)
     .filter((model, index, all) => all.indexOf(model) === index);
@@ -58,7 +55,7 @@ export async function requestGeminiWithFallback<T>({
   parseError,
   attemptsPerModel = 2,
   timeoutMs = 30_000
-}: GeminiRequestOptions<T>): Promise<{ data: T; model: string }> {
+}: GeminiRequestOptions<T>): Promise<{ data: T; model: string; providerRequestId?: string }> {
   const failures: GeminiAttempt[] = [];
 
   for (const model of configuredModels(models)) {
@@ -78,7 +75,17 @@ export async function requestGeminiWithFallback<T>({
         });
         const data = (await response.json().catch(() => ({}))) as T;
 
-        if (response.ok) return { data, model };
+        if (response.ok) {
+          return {
+            data,
+            model,
+            providerRequestId:
+              response.headers.get('x-goog-request-id') ||
+              response.headers.get('x-request-id') ||
+              response.headers.get('x-guploader-uploadid') ||
+              undefined
+          };
+        }
 
         const message = parseError?.(data) || messageFromUnknown(data) || 'Temporary Gemini availability issue.';
         failures.push({ model, status: response.status, message });
@@ -101,3 +108,4 @@ export async function requestGeminiWithFallback<T>({
 
   throw new GeminiUnavailableError('SAVI could not reach its AI service after retrying.', failures);
 }
+import { getConfiguredTextModels } from '@/lib/pricing/saviPricing';

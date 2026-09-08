@@ -40,7 +40,8 @@ export async function resolveCommand(name: string) {
 export async function runCommand(command: string, args: string[], cwd?: string) {
   return execFileAsync(await resolveCommand(command), args, {
     cwd,
-    maxBuffer: 1024 * 1024 * 32
+    maxBuffer: 1024 * 1024 * 32,
+    timeout: 120_000
   });
 }
 

@@ -1,15 +1,20 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { OutputGallery, type OutputGalleryItem } from '@/components/OutputGallery';
 import { ToolSelect } from '@/components/ToolSelect';
-import { UpgradeModal } from '@/components/UpgradeModal';
 import { ToolPreview } from '@/components/ToolPreview';
 import { SketchCanvas, type SketchCanvasHandle, type SketchCanvasTool } from '@/components/image-tools/SketchCanvas';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
-import { getSaviTextToImageCreditCost } from '@/lib/ai/saviAgent';
+import {
+  applyAuthoritativeBalance,
+  clearSaviClientRequestId,
+  createSaviClientRequestId,
+  createSaviRequestScope,
+  readPrivateTextAsset
+} from '@/lib/savi/clientGeneration';
 
 type ImageToolId =
   | 'text_to_image'
@@ -44,11 +49,9 @@ type SketchResult = {
   sketchDataUrl: string;
   prompt: string;
   status: 'loading' | 'ready' | 'error';
-  model: 'nano-banana' | 'nano-banana-pro';
 };
 
 type MockupCategory = 'devices' | 'clothing' | 'print';
-type MockupModel = 'nano-banana' | 'nano-banana-pro';
 
 type MockupPreset = {
   id: string;
@@ -93,7 +96,6 @@ const imageTools: Array<{
   description: string;
   promptPlaceholder: string;
   needsImage: boolean;
-  cost: number;
   hiddenInstruction: string;
 }> = [
   {
@@ -102,7 +104,6 @@ const imageTools: Array<{
     description: 'Create a clean image from a written idea.',
     promptPlaceholder: 'Example: Create a cinematic poster of a premium AI workspace on a glass desk, violet-blue glow, clean typography space, realistic studio lighting.',
     needsImage: false,
-    cost: 75,
     hiddenInstruction: 'Generate a high-quality image from the user idea. Keep composition clean, premium, and useful.'
   },
   {
@@ -111,7 +112,6 @@ const imageTools: Array<{
     description: 'Build a visual sequence shot by shot, then continue from the previous image.',
     promptPlaceholder: 'Example: Build a six-frame story where a pomegranate falls from a tree, a child finds it, then shares it with someone in warm afternoon light.',
     needsImage: false,
-    cost: 95,
     hiddenInstruction: 'Create a consistent cinematic storyboard sequence. Each shot should work as a realistic frame and preserve style continuity from earlier shots.'
   },
   {
@@ -120,7 +120,6 @@ const imageTools: Array<{
     description: 'Draw a rough idea, add a prompt, and turn it into a polished image.',
     promptPlaceholder: 'Example: Turn this rough sketch into a realistic collectible fashion doll on a dark grid background, premium materials, clean product lighting.',
     needsImage: false,
-    cost: 130,
     hiddenInstruction: 'Use the canvas sketch as a reference. Preserve the rough layout and turn it into a polished generated image.'
   },
   {
@@ -129,7 +128,6 @@ const imageTools: Array<{
     description: 'Upload an image and create a hook, caption, hashtags, and post idea.',
     promptPlaceholder: 'Example: Turn this cafe portrait into a stylish Instagram post with one bold hook, a short caption, 8 hashtags, and a soft premium brand tone.',
     needsImage: true,
-    cost: 3,
     hiddenInstruction: 'Analyze the provided image and create a short Instagram post package with hook, caption, content angle, and hashtags.'
   },
   {
@@ -138,7 +136,6 @@ const imageTools: Array<{
     description: 'Turn a product idea into a premium product photography prompt.',
     promptPlaceholder: 'Example: SAVI daily hydration cream on warm stone with eucalyptus, dewy texture, soft morning window light, calm luxury skincare campaign.',
     needsImage: false,
-    cost: 3,
     hiddenInstruction: 'Create a detailed product photography prompt with subject, surface, lighting, composition, camera, mood, and usage notes.'
   },
   {
@@ -147,7 +144,6 @@ const imageTools: Array<{
     description: 'Change details while keeping the original subject consistent.',
     promptPlaceholder: 'Example: Keep the person exactly the same, change the cafe into a clean luxury studio, soften the light, and preserve face, pose, and framing.',
     needsImage: true,
-    cost: 160,
     hiddenInstruction: 'Edit the provided image based on the user request while preserving the main subject and identity.'
   },
   {
@@ -156,7 +152,6 @@ const imageTools: Array<{
     description: 'Remove the background or replace it with a new scene.',
     promptPlaceholder: 'Example: Remove only the background and place the subject on a soft white studio backdrop. Keep hair edges, shadows, and subject untouched.',
     needsImage: true,
-    cost: 200,
     hiddenInstruction: 'Mask the background only. Preserve the subject exactly and create a clean transparent or requested background.'
   },
   {
@@ -165,7 +160,6 @@ const imageTools: Array<{
     description: 'Remove one unwanted object and rebuild the area naturally.',
     promptPlaceholder: 'Example: Remove the person in the back-right corner and rebuild the cafe wall, shelves, and lighting naturally. Do not change the main subject.',
     needsImage: true,
-    cost: 250,
     hiddenInstruction: 'Remove only the target object described by the user. Preserve the rest of the image and avoid changing the subject.'
   },
   {
@@ -174,7 +168,6 @@ const imageTools: Array<{
     description: 'Change outfit, color, material, or visual style without changing identity.',
     promptPlaceholder: 'Example: Change only the outfit to a matte charcoal blazer and silk top. Keep the face, pose, hair, lighting, and background unchanged.',
     needsImage: true,
-    cost: 250,
     hiddenInstruction: 'Change the requested clothing or style while preserving face, pose, body shape, lighting direction, and image structure.'
   },
   {
@@ -183,7 +176,6 @@ const imageTools: Array<{
     description: 'Turn a product reference into a premium ad-style product image.',
     promptPlaceholder: 'Example: Use this product as the hero item on a reflective white glass surface, botanical props, soft shadow, high-end ecommerce campaign look.',
     needsImage: true,
-    cost: 180,
     hiddenInstruction: 'Create a polished product photography output using the reference image and the requested campaign style.'
   },
   {
@@ -192,7 +184,6 @@ const imageTools: Array<{
     description: 'Place a logo or design onto devices, clothing, print, or a custom surface.',
     promptPlaceholder: 'Example: Place this logo naturally on a matte black laptop screen in a modern studio, realistic perspective, soft reflections, no extra branding.',
     needsImage: true,
-    cost: 180,
     hiddenInstruction: 'Create a photorealistic mockup. Use the first uploaded image as the logo or design, then place it naturally on the selected product or surface with realistic lighting, perspective, shadows, and material texture.'
   },
   {
@@ -201,7 +192,6 @@ const imageTools: Array<{
     description: 'Blend a subject, scene, and style into one finished image.',
     promptPlaceholder: 'Example: Blend the selected subject, scene, and style into one premium hero image for a calm skincare launch, natural light, clean composition.',
     needsImage: false,
-    cost: 210,
     hiddenInstruction: 'Blend the selected subject, scene, and style references into one cohesive premium image. Preserve the strongest visual cues from each category without making a collage.'
   },
   {
@@ -210,17 +200,15 @@ const imageTools: Array<{
     description: 'Create readable text, poster layouts, badges, labels, or covers.',
     promptPlaceholder: 'Example: Design a clean launch poster that says “Ask. Create. Organise.” with SAVI branding, purple-blue glow, readable premium layout.',
     needsImage: false,
-    cost: 120,
     hiddenInstruction: 'Create a clean graphic layout with accurate readable text, strong hierarchy, and premium spacing.'
   },
   {
     id: 'variations',
-    title: 'Create variations',
-    description: 'Generate multiple consistent variations from one visual direction.',
-    promptPlaceholder: 'Example: Create four variations of this product ad: warmer light, darker luxury mood, clean white ecommerce style, and bold social campaign style.',
+    title: 'Create variation',
+    description: 'Create one polished alternative while keeping the core visual direction consistent.',
+    promptPlaceholder: 'Example: Create a warmer seasonal variation of this product ad with golden light, premium texture, and the product still clearly recognisable.',
     needsImage: true,
-    cost: 220,
-    hiddenInstruction: 'Create several variations while preserving the main subject and brand direction.'
+    hiddenInstruction: 'Create one distinct variation while preserving the main subject, product, and brand direction.'
   }
 ];
 
@@ -360,7 +348,7 @@ const promptIdeas: Record<ImageToolId, string[]> = {
   mockup: ['Place my logo on a premium laptop mockup', 'Put this design on a canvas tote bag', 'Create a billboard mockup in a city street'],
   visual_mixer: ['Blend these into a premium launch campaign image', 'Create a cohesive cinematic hero image', 'Make a polished product scene from the selected references'],
   text_design: ['Create a clean launch poster for SAVI', 'Design a readable Instagram quote card', 'Create a bold app promo banner'],
-  variations: ['Create 4 consistent ad variations', 'Make seasonal color variations', 'Create square and vertical versions']
+  variations: ['Create a warmer seasonal variation', 'Make one darker luxury variation', 'Create a clean ecommerce variation']
 };
 
 const templateToImageTool: Record<string, ImageToolId> = {
@@ -427,17 +415,32 @@ function createSketchResult(updates: Partial<SketchResult> = {}): SketchResult {
     sketchDataUrl: '',
     prompt: '',
     status: 'loading',
-    model: 'nano-banana',
     ...updates
   };
 }
 
-function imageReferenceFromDataUrl(imageUrl?: string, name = 'previous-shot.png') {
-  if (!imageUrl?.startsWith('data:')) return undefined;
-  const [header, data] = imageUrl.split(',');
-  const mimeType = header.match(/^data:(.*?);base64$/)?.[1] || 'image/png';
-  if (!data) return undefined;
-  return { data, mimeType, name };
+async function imageReferenceFromDataUrl(imageUrl?: string, name = 'previous-shot.png') {
+  if (!imageUrl) return undefined;
+  if (imageUrl.startsWith('data:')) {
+    const [header, data] = imageUrl.split(',');
+    const mimeType = header.match(/^data:(.*?);base64$/)?.[1] || 'image/png';
+    return data ? { data, mimeType, name } : undefined;
+  }
+
+  // Generated assets are private endpoints, not public data URLs. Re-read an
+  // owned asset only when it is needed as the next story reference.
+  const response = await fetch(imageUrl, { cache: 'no-store', credentials: 'same-origin' });
+  if (!response.ok) throw new Error('SAVI could not load the previous story image.');
+  const blob = await response.blob();
+  if (!blob.type.startsWith('image/')) throw new Error('The previous story asset is not an image.');
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('SAVI could not prepare the previous story image.'));
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.readAsDataURL(blob);
+  });
+  const [, data = ''] = dataUrl.split(',');
+  return data ? { data, mimeType: blob.type || 'image/png', name } : undefined;
 }
 
 export function ImageToolsStudio({
@@ -446,7 +449,7 @@ export function ImageToolsStudio({
   template,
   templateLaunchKey = 0
 }: {
-  credits: number;
+  credits: number | null;
   onCreditsChange: (credits: number) => void;
   template?: TemplateItem;
   templateLaunchKey?: number;
@@ -479,7 +482,6 @@ export function ImageToolsStudio({
   const [sketchText, setSketchText] = useState('SAVI');
   const [sketchPrompt, setSketchPrompt] = useState('');
   const [sketchAdditionalPrompt, setSketchAdditionalPrompt] = useState('Transform this drawing into a polished realistic image. Preserve the sketch composition and make it useful for a premium brand.');
-  const [sketchModel, setSketchModel] = useState<'nano-banana' | 'nano-banana-pro'>('nano-banana');
   const [sketchResults, setSketchResults] = useState<SketchResult[]>([]);
   const [isSketchEmpty, setIsSketchEmpty] = useState(true);
   const [isSketchGenerating, setIsSketchGenerating] = useState(false);
@@ -491,7 +493,6 @@ export function ImageToolsStudio({
   const [mockupSurfaceFile, setMockupSurfaceFile] = useState<File | null>(null);
   const [mockupCategory, setMockupCategory] = useState<MockupCategory>('devices');
   const [mockupPresetId, setMockupPresetId] = useState('laptop');
-  const [mockupModel, setMockupModel] = useState<MockupModel>('nano-banana');
   const [visualMixerBriefs, setVisualMixerBriefs] = useState<Record<VisualMixerCategory, string>>({ ...emptyVisualMixerBriefs });
   const [visualMixerIngredients, setVisualMixerIngredients] = useState<Record<VisualMixerCategory, VisualMixerIngredient[]>>({
     subject: [],
@@ -502,19 +503,68 @@ export function ImageToolsStudio({
   const [visualMixerResults, setVisualMixerResults] = useState<VisualMixerResult[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
-  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [serverQuote, setServerQuote] = useState<number | null>(null);
+  const [isServerQuoteLoading, setIsServerQuoteLoading] = useState(false);
   const workAreaRef = useRef<HTMLDivElement | null>(null);
   const pendingTextToImageRequestRef = useRef<PendingTextToImageRequest | null>(null);
 
   const selectedTool = imageTools.find((tool) => tool.id === toolId) ?? imageTools[0];
   const selectedMockupPreset = mockupPresets.find((item) => item.id === mockupPresetId) ?? mockupPresets[0];
-  const creditCost = useMemo(() => {
-    if (selectedTool.id === 'text_to_image') return getSaviTextToImageCreditCost(quality);
-    if (textOnlyImageTools.has(selectedTool.id)) return selectedTool.cost;
-    const qualityAdd = quality === '4K' ? 140 : quality === '1080' ? 50 : 0;
-    const mockupModelAdd = selectedTool.id === 'mockup' && mockupModel === 'nano-banana-pro' ? 90 : 0;
-    return selectedTool.cost + qualityAdd + mockupModelAdd;
-  }, [mockupModel, quality, selectedTool.cost, selectedTool.id]);
+  const updateServerBalance = (response: { availableCredits?: unknown }) => {
+    applyAuthoritativeBalance(response.availableCredits, onCreditsChange);
+  };
+  const referenceImageCount = selectedTool.id === 'mockup'
+    ? Number(Boolean(mockupDesignFile)) + Number(Boolean(mockupSurfaceFile))
+    : selectedTool.id === 'visual_mixer'
+      ? Object.values(visualMixerIngredients).flat().filter((item) => item.active).length
+      : imageFile ? 1 : 0;
+  const quoteLabel = isServerQuoteLoading
+    ? 'Loading current price...'
+    : serverQuote === null
+      ? user ? 'Price unavailable' : 'Sign in to view price'
+      : `${serverQuote} credits`;
+
+  useEffect(() => {
+    if (isAuthLoading || !user) {
+      setServerQuote(null);
+      setIsServerQuoteLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsServerQuoteLoading(true);
+    void (async () => {
+      try {
+        const searchParams = new URLSearchParams({
+          toolId: selectedTool.id,
+          quality,
+          aspectRatio,
+          referenceImageCount: String(referenceImageCount),
+          textCharacters: String(Math.max(1, prompt.length))
+        });
+        const response = await fetch(`/api/pricing/quote?${searchParams.toString()}`, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          signal: controller.signal
+        });
+        const data = (await response.json().catch(() => ({}))) as { credits?: unknown };
+        if (!response.ok || typeof data.credits !== 'number' || data.credits < 1) {
+          throw new Error('SAVI pricing is unavailable.');
+        }
+        setServerQuote(data.credits);
+      } catch {
+        if (!controller.signal.aborted) {
+          setServerQuote(null);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsServerQuoteLoading(false);
+        }
+      }
+    })();
+
+    return () => controller.abort();
+  }, [aspectRatio, isAuthLoading, prompt.length, quality, referenceImageCount, selectedTool.id, user?.id]);
 
   useEffect(() => {
     const closeActiveTool = () => {
@@ -553,7 +603,6 @@ export function ImageToolsStudio({
     setSketchText('SAVI');
     setSketchPrompt('');
     setSketchAdditionalPrompt('Transform this drawing into a polished realistic image. Preserve the sketch composition and make it useful for a premium brand.');
-    setSketchModel('nano-banana');
     setSketchResults([]);
     setIsSketchEmpty(true);
     sketchCanvasRef.current?.clear();
@@ -570,7 +619,6 @@ export function ImageToolsStudio({
     setMockupSurfaceFile(null);
     setMockupCategory('devices');
     setMockupPresetId('laptop');
-    setMockupModel('nano-banana');
   }
 
   function resetVisualMixerStudio() {
@@ -708,14 +756,10 @@ export function ImageToolsStudio({
     }
   }
 
-  async function generateSketchImage(existingPrompt?: string, existingSketchDataUrl?: string, existingModel?: 'nano-banana' | 'nano-banana-pro') {
+  async function generateSketchImage(existingPrompt?: string, existingSketchDataUrl?: string) {
     const sketchDataUrl = existingSketchDataUrl || sketchCanvasRef.current?.getCanvasData();
     if (!sketchDataUrl || (!existingSketchDataUrl && isSketchEmpty)) {
       setError('Draw something or upload a reference image first.');
-      return;
-    }
-    if (credits < creditCost) {
-      setShowUpgrade(true);
       return;
     }
     if (isAuthLoading) return;
@@ -723,20 +767,17 @@ export function ImageToolsStudio({
       signIn();
       return;
     }
-
     const cleanPrompt = (existingPrompt ?? sketchPrompt).trim();
     const finalPrompt = [
       cleanPrompt || 'Create a polished image from this sketch.',
       sketchAdditionalPrompt.trim(),
-      existingModel === 'nano-banana-pro' || sketchModel === 'nano-banana-pro'
-        ? 'Use the more detailed pro direction: cleaner lighting, stronger realism, more refined materials, and better composition.'
-        : 'Use fast creative refinement while keeping the image clean and coherent.'
+      'Use a careful, polished direction with clean lighting, realistic materials, and a coherent composition.'
     ]
       .filter(Boolean)
       .join('\n\n');
     const resultId = makeClientId();
-    const model = existingModel || sketchModel;
     const sketchBase64 = sketchDataUrl.includes(',') ? sketchDataUrl.split(',')[1] : sketchDataUrl;
+    const requestScope = createSaviRequestScope('sketch-to-image', [finalPrompt, sketchBase64.length, quality, style]);
 
     setError('');
     setIsSketchGenerating(true);
@@ -744,8 +785,7 @@ export function ImageToolsStudio({
       createSketchResult({
         id: resultId,
         sketchDataUrl,
-        prompt: cleanPrompt,
-        model
+        prompt: cleanPrompt
       }),
       ...current
     ]);
@@ -761,7 +801,8 @@ export function ImageToolsStudio({
           toolId: 'sketch_to_image',
           aspectRatio: '16:9',
           quality,
-          style: `${style} ${model === 'nano-banana-pro' ? 'Nano Banana Pro' : 'Nano Banana Fast'} sketch refinement`,
+          style: `${style} sketch refinement`,
+          clientRequestId: createSaviClientRequestId(requestScope),
           referenceImage: {
             data: sketchBase64,
             mimeType: 'image/png',
@@ -773,9 +814,16 @@ export function ImageToolsStudio({
         image?: string;
         filename?: string;
         error?: string;
+        availableCredits?: number;
+        jobId?: string;
       };
 
+      if (response.status !== 202) clearSaviClientRequestId(requestScope);
+
       if (!response.ok || !data.image) {
+        if (response.status === 202 && data.jobId) {
+          throw new Error('SAVI is still refining this sketch. Generate again in a moment to check the same safe request without a second charge.');
+        }
         throw new Error(data.error || 'Sketch refinement failed.');
       }
       const resultImage = data.image;
@@ -799,7 +847,7 @@ export function ImageToolsStudio({
         url: resultImage,
         filename: data.filename || 'savi-sketch-image.png'
       });
-      onCreditsChange(credits - creditCost);
+      updateServerBalance(data);
     } catch (sketchError) {
       setSketchResults((current) => current.map((item) => (item.id === resultId ? { ...item, status: 'error' } : item)));
       setError(sketchError instanceof Error ? sketchError.message : 'Sketch refinement failed.');
@@ -815,12 +863,8 @@ export function ImageToolsStudio({
       setError('Add an image first for this tool.');
       return;
     }
-    if (!prompt.trim() && !['remove_background', 'variations'].includes(selectedTool.id)) {
+    if (!prompt.trim() && selectedTool.id !== 'remove_background') {
       setError('Write what you want SAVI to create or change.');
-      return;
-    }
-    if (!isProtectedTextToImage && credits < creditCost) {
-      setShowUpgrade(true);
       return;
     }
     if (isAuthLoading) return;
@@ -828,28 +872,28 @@ export function ImageToolsStudio({
       signIn();
       return;
     }
-
     setIsGenerating(true);
     setGeneratedImageUrl('');
     setGeneratedImageName('');
     setGenerationMode('');
 
     try {
-      const requestKey = [
-        prompt.trim(),
-        aspectRatio,
+    const requestKey = [
+      prompt.trim(),
+      aspectRatio,
         quality,
         style,
         imageFile?.name || '',
         imageFile?.size || '',
-        imageFile?.lastModified || ''
-      ].join('|');
+      imageFile?.lastModified || ''
+    ].join('|');
+      const requestScope = createSaviRequestScope('image-generate', [selectedTool.id, requestKey]);
       const pendingRequest = pendingTextToImageRequestRef.current;
       const clientRequestId = isProtectedTextToImage
         ? pendingRequest?.key === requestKey
           ? pendingRequest.clientRequestId
-          : makeClientId()
-        : undefined;
+          : createSaviClientRequestId(requestScope)
+        : createSaviClientRequestId(requestScope);
       if (isProtectedTextToImage && clientRequestId) {
         pendingTextToImageRequestRef.current = { key: requestKey, clientRequestId };
       }
@@ -862,23 +906,35 @@ export function ImageToolsStudio({
           }
         : undefined;
 
-      const response = await fetch('/api/image/generate', {
+      const isTextTool = textOnlyImageTools.has(selectedTool.id);
+      const response = await fetch(isTextTool ? '/api/text/generate' : '/api/image/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          prompt: prompt.trim() || selectedTool.title,
-          toolId: selectedTool.id,
-          aspectRatio,
-          quality,
-          style,
-          referenceImage,
-          clientRequestId
-        })
+        body: JSON.stringify(
+          isTextTool
+            ? {
+                prompt: prompt.trim() || selectedTool.title,
+                toolId: selectedTool.id,
+                referenceImage,
+                clientRequestId
+              }
+            : {
+                prompt: prompt.trim() || selectedTool.title,
+                toolId: selectedTool.id,
+                aspectRatio,
+                quality,
+                style,
+                referenceImage,
+                clientRequestId
+              }
+        )
       });
       const data = (await response.json().catch(() => ({}))) as {
         image?: string;
+        result?: string;
+        asset?: string;
         filename?: string;
         mode?: string;
         error?: string;
@@ -887,24 +943,43 @@ export function ImageToolsStudio({
         jobId?: string;
       };
 
-      if (!response.ok || !data.image) {
-        if (
-          isProtectedTextToImage &&
-          ['INVALID_INPUT', 'UNSUPPORTED_INPUT', 'POLICY_REJECTION', 'INSUFFICIENT_CREDITS', 'AUTH_REQUIRED'].includes(data.category || '')
-        ) {
-          pendingTextToImageRequestRef.current = null;
-        }
+      if (response.status !== 202) {
+        clearSaviClientRequestId(requestScope);
+        if (isProtectedTextToImage) pendingTextToImageRequestRef.current = null;
+      }
+
+      if (!response.ok || (!isTextTool && !data.image) || (isTextTool && !data.result && !data.asset)) {
         if (response.status === 202 && data.jobId) {
-          throw new Error('This image is still being finalized. Try again in a moment.');
+          throw new Error('SAVI is still finishing this image. Generate again in a moment to check the same safe request without a second charge.');
         }
         throw new Error(data.error || 'Image generation failed.');
       }
-      const resultImage = data.image;
+      if (isTextTool) {
+        const resultText = data.result || await readPrivateTextAsset(data.asset);
+        if (!resultText) throw new Error('SAVI could not load the text result.');
+        setOutputBrief(resultText);
+        setGeneratedImageUrl('');
+        setGeneratedImageName(data.filename || `savi-${selectedTool.id}.txt`);
+        setGenerationMode('text');
+        recordMediaItem({
+          type: 'text',
+          title: selectedTool.title,
+          source: 'Images',
+          url: data.asset,
+          filename: data.filename || `savi-${selectedTool.id}.txt`,
+          text: resultText
+        });
+        updateServerBalance(data);
+        if (isProtectedTextToImage) pendingTextToImageRequestRef.current = null;
+        return;
+      }
+
+      const resultImage = data.image as string;
       const resultFilename = data.filename || 'savi-generated-image.png';
 
       const brief = [
       `Tool: ${selectedTool.title}`,
-      `Model direction: Nano Banana image generation and conversational editing`,
+      'Rendering path: SAVI Image',
       `User request: ${prompt.trim() || selectedTool.title}`,
       `Image input: ${imageName || 'No reference image'}`,
       `Aspect ratio: ${aspectRatio}`,
@@ -944,11 +1019,7 @@ export function ImageToolsStudio({
         url: resultImage,
         filename: resultFilename
       });
-      if (isProtectedTextToImage && typeof data.availableCredits === 'number') {
-        onCreditsChange(data.availableCredits);
-      } else if (!isProtectedTextToImage) {
-        onCreditsChange(credits - creditCost);
-      }
+      updateServerBalance(data);
       if (isProtectedTextToImage) pendingTextToImageRequestRef.current = null;
     } catch (generateError) {
       setError(generateError instanceof Error ? generateError.message : 'Image generation failed.');
@@ -963,10 +1034,6 @@ export function ImageToolsStudio({
       setError('Upload a logo or design first.');
       return;
     }
-    if (credits < creditCost) {
-      setShowUpgrade(true);
-      return;
-    }
     if (isAuthLoading) return;
     if (!user) {
       signIn();
@@ -978,13 +1045,19 @@ export function ImageToolsStudio({
       selectedMockupPreset.defaultPrompt,
       customInstruction ? `User instruction: ${customInstruction}` : '',
       mockupSurfaceFile ? 'Use the second uploaded image as the target surface or environment context.' : '',
-      mockupModel === 'nano-banana-pro'
-        ? 'Use the pro mockup direction: stronger realism, cleaner perspective matching, natural shadows, and premium product photography polish.'
-        : 'Use the fast mockup direction: clean placement, realistic lighting, and clear brand visibility.',
+      'Use careful perspective matching, natural shadows, realistic lighting, and premium product photography polish.',
       'Do not add unrelated logos, random text, watermark labels, or extra brand names.'
     ]
       .filter(Boolean)
       .join('\n\n');
+    const requestScope = createSaviRequestScope('mockup', [
+      finalPrompt,
+      selectedMockupPreset.id,
+      quality,
+      style,
+      `${mockupDesignFile.name}:${mockupDesignFile.size}:${mockupDesignFile.lastModified}`,
+      mockupSurfaceFile ? `${mockupSurfaceFile.name}:${mockupSurfaceFile.size}:${mockupSurfaceFile.lastModified}` : ''
+    ]);
 
     setIsGenerating(true);
     setGeneratedImageUrl('');
@@ -1018,8 +1091,9 @@ export function ImageToolsStudio({
           toolId: 'mockup',
           aspectRatio: '16:9',
           quality,
-          style: `${style} ${mockupModel === 'nano-banana-pro' ? 'Nano Banana Pro' : 'Nano Banana Fast'} mockup`,
-          referenceImages
+          style: `${style} product mockup`,
+          referenceImages,
+          clientRequestId: createSaviClientRequestId(requestScope)
         })
       });
       const data = (await response.json().catch(() => ({}))) as {
@@ -1027,9 +1101,16 @@ export function ImageToolsStudio({
         filename?: string;
         mode?: string;
         error?: string;
+        availableCredits?: number;
+        jobId?: string;
       };
 
+      if (response.status !== 202) clearSaviClientRequestId(requestScope);
+
       if (!response.ok || !data.image) {
+        if (response.status === 202 && data.jobId) {
+          throw new Error('SAVI is still finishing this mockup. Generate again in a moment to check the same safe request without a second charge.');
+        }
         throw new Error(data.error || 'Mockup generation failed.');
       }
       const resultImage = data.image;
@@ -1038,7 +1119,7 @@ export function ImageToolsStudio({
       const brief = [
         `Tool: Mockup`,
         `Preset: ${selectedMockupPreset.label}`,
-        `Model direction: ${mockupModel === 'nano-banana-pro' ? 'Nano Banana Pro' : 'Nano Banana Fast'}`,
+        'Rendering path: SAVI Image',
         `Design input: ${mockupDesignName}`,
         `Surface input: ${mockupSurfaceName || 'Preset-generated surface'}`,
         `Quality: ${quality}`,
@@ -1076,7 +1157,7 @@ export function ImageToolsStudio({
         url: resultImage,
         filename: resultFilename
       });
-      onCreditsChange(credits - creditCost);
+      updateServerBalance(data);
     } catch (mockupError) {
       setError(mockupError instanceof Error ? mockupError.message : 'Mockup generation failed.');
     } finally {
@@ -1105,10 +1186,6 @@ export function ImageToolsStudio({
       setError('Add at least one image or describe a subject, scene, or style.');
       return;
     }
-    if (credits < creditCost) {
-      setShowUpgrade(true);
-      return;
-    }
     if (isAuthLoading) return;
     if (!user) {
       signIn();
@@ -1127,6 +1204,13 @@ export function ImageToolsStudio({
     ]
       .filter(Boolean)
       .join('\n\n');
+    const requestScope = createSaviRequestScope('visual-mixer', [
+      finalPrompt,
+      aspectRatio,
+      quality,
+      style,
+      activeIngredients.map((item) => `${item.category}:${item.name}:${item.file.size}:${item.file.lastModified}`).join('|')
+    ]);
 
     const resultId = makeClientId();
     setIsGenerating(true);
@@ -1162,16 +1246,24 @@ export function ImageToolsStudio({
           aspectRatio,
           quality,
           style: `${style} visual mixer`,
-          referenceImages
+          referenceImages,
+          clientRequestId: createSaviClientRequestId(requestScope)
         })
       });
       const data = (await response.json().catch(() => ({}))) as {
         image?: string;
         filename?: string;
         error?: string;
+        availableCredits?: number;
+        jobId?: string;
       };
 
+      if (response.status !== 202) clearSaviClientRequestId(requestScope);
+
       if (!response.ok || !data.image) {
+        if (response.status === 202 && data.jobId) {
+          throw new Error('SAVI is still finishing this visual mix. Generate again in a moment to check the same safe request without a second charge.');
+        }
         throw new Error(data.error || 'Visual mixer generation failed.');
       }
       const resultImage = data.image;
@@ -1195,7 +1287,7 @@ export function ImageToolsStudio({
         url: resultImage,
         filename: data.filename || 'savi-visual-mixer.png'
       });
-      onCreditsChange(credits - creditCost);
+      updateServerBalance(data);
     } catch (mixerError) {
       setVisualMixerResults((current) => current.map((item) => (item.id === resultId ? { ...item, status: 'error' } : item)));
       setError(mixerError instanceof Error ? mixerError.message : 'Visual mixer generation failed.');
@@ -1225,7 +1317,6 @@ export function ImageToolsStudio({
 
       const next = createStoryShot({
         parentImageUrl: parent.imageUrl,
-        imageUrl: parent.imageUrl,
         placeholder: 'Example: Continue the same scene with the next natural action, same character, light, and camera language.'
       });
       const copy = [...current];
@@ -1267,10 +1358,6 @@ export function ImageToolsStudio({
       setError('Write a prompt for this shot first.');
       return;
     }
-    if (credits < creditCost) {
-      setShowUpgrade(true);
-      return;
-    }
     if (isAuthLoading) return;
     if (!user) {
       signIn();
@@ -1281,13 +1368,20 @@ export function ImageToolsStudio({
     updateStoryShot(id, { isGenerating: true });
 
     try {
-      const parentReference = imageReferenceFromDataUrl(shot.parentImageUrl, 'previous-story-shot.png');
+      const parentReference = await imageReferenceFromDataUrl(shot.parentImageUrl, 'previous-story-shot.png');
       const finalPrompt = [
         shot.parentImageUrl ? 'Continue the story from the previous reference image. Keep the same realistic visual world, lighting, and subject continuity.' : 'Create the first realistic shot of a visual story sequence.',
         `Global style: ${storyInstructions.trim() || 'Realistic cinematic frames, consistent lighting, premium visual style.'}`,
         `Selected style preset: ${style}.`,
         `Shot prompt: ${shot.prompt.trim()}`
       ].join('\n\n');
+      const requestScope = createSaviRequestScope('story-sketch-shot', [
+        id,
+        finalPrompt,
+        quality,
+        style,
+        shot.parentImageUrl || ''
+      ]);
 
       const response = await fetch('/api/image/generate', {
         method: 'POST',
@@ -1300,16 +1394,24 @@ export function ImageToolsStudio({
           aspectRatio: '16:9',
           quality,
           style: `${style} realistic storyboard`,
-          referenceImage: parentReference
+          referenceImage: parentReference,
+          clientRequestId: createSaviClientRequestId(requestScope)
         })
       });
       const data = (await response.json().catch(() => ({}))) as {
         image?: string;
         filename?: string;
         error?: string;
+        availableCredits?: number;
+        jobId?: string;
       };
 
+      if (response.status !== 202) clearSaviClientRequestId(requestScope);
+
       if (!response.ok || !data.image) {
+        if (response.status === 202 && data.jobId) {
+          throw new Error('SAVI is still finishing this story shot. Generate again in a moment to check the same safe request without a second charge.');
+        }
         throw new Error(data.error || 'Story shot generation failed.');
       }
       const resultImage = data.image;
@@ -1328,7 +1430,7 @@ export function ImageToolsStudio({
         url: resultImage,
         filename: resultFilename
       });
-      onCreditsChange(credits - creditCost);
+      updateServerBalance(data);
     } catch (storyError) {
       updateStoryShot(id, { isGenerating: false });
       setError(storyError instanceof Error ? storyError.message : 'Story shot generation failed.');
@@ -1370,7 +1472,7 @@ export function ImageToolsStudio({
               </div>
             </div>
             <p className="mt-3 text-sm leading-6 text-slate-600">
-              Generate a frame, then use Next shot to continue from that image. Each generation costs <strong>{creditCost} credits</strong>.
+              Generate a frame, then use Next shot to continue from that image. Each generation uses the current server quote: <strong>{quoteLabel}</strong>.
             </p>
           </div>
         </div>
@@ -1378,6 +1480,7 @@ export function ImageToolsStudio({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {storyShots.map((shot, index) => {
             const hasGeneratedImage = Boolean(shot.imageUrl && !shot.parentImageUrl);
+            const previewImage = shot.imageUrl || shot.parentImageUrl;
             const canGenerate = !shot.isGenerating && shot.prompt.trim().length > 0;
 
             return (
@@ -1401,8 +1504,8 @@ export function ImageToolsStudio({
                 }`}
               >
                 <div className="relative aspect-video overflow-hidden rounded-[22px] border border-violet-100 bg-gradient-to-br from-violet-100 via-white to-blue-100">
-                  {shot.imageUrl ? (
-                    <img src={shot.imageUrl} alt={shot.prompt || `Shot ${index + 1}`} className={`h-full w-full object-cover ${shot.parentImageUrl ? 'opacity-50' : ''}`} />
+                  {previewImage ? (
+                    <img src={previewImage} alt={shot.prompt || `Shot ${index + 1}`} className={`h-full w-full object-cover ${shot.parentImageUrl && !shot.imageUrl ? 'opacity-50' : ''}`} />
                   ) : (
                     <div className="grid h-full place-items-center px-6 text-center text-sm font-bold text-slate-500">
                       {shot.parentImageUrl ? 'Previous image is ready. Describe the next moment.' : 'Describe and generate this shot.'}
@@ -1595,27 +1698,12 @@ export function ImageToolsStudio({
               rows={3}
               className="mt-3 min-h-[88px] w-full resize-none rounded-[20px] border border-violet-100 bg-white/75 px-4 py-3 text-sm leading-6 text-slate-800 outline-none focus:border-violet-300"
             />
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <ToolSelect label="Quality" value={quality} options={qualities} onChange={setQuality} />
               <ToolSelect label="Style" value={style} options={styles} onChange={setStyle} />
-              <div className="rounded-[24px] border border-violet-100 bg-white/65 p-3">
-                <p className="px-1 text-xs font-black uppercase tracking-[0.16em] text-violet-500">Model</p>
-                <div className="mt-2 grid gap-2">
-                  {(['nano-banana', 'nano-banana-pro'] as const).map((item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => setSketchModel(item)}
-                      className={`rounded-2xl px-3 py-2 text-sm font-black transition ${sketchModel === item ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-violet-50'}`}
-                    >
-                      {item === 'nano-banana-pro' ? 'Pro' : 'Fast'}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-violet-100 pt-3">
-              <span className="text-xs font-black text-slate-500">{creditCost} credits</span>
+              <span className="text-xs font-black text-slate-500">{quoteLabel}</span>
               <button
                 type="button"
                 disabled={isSketchGenerating}
@@ -1643,14 +1731,14 @@ export function ImageToolsStudio({
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-500">{item.model === 'nano-banana-pro' ? 'Pro result' : 'Fast result'}</p>
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-500">SAVI Image result</p>
                       <p className="mt-1 line-clamp-2 text-sm font-bold text-slate-700">{item.prompt || 'Polished image from sketch'}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {item.status === 'ready' && (
                         <>
                           <button type="button" onClick={() => sketchCanvasRef.current?.addImage(item.dataUrl)} className="mini-tool-button">Add to canvas</button>
-                          <button type="button" onClick={() => generateSketchImage(item.prompt, item.sketchDataUrl, item.model)} className="mini-tool-button">Regenerate</button>
+                          <button type="button" onClick={() => generateSketchImage(item.prompt, item.sketchDataUrl)} className="mini-tool-button">Regenerate</button>
                           <a href={item.dataUrl} download={item.filename} className="mini-tool-button">Download</a>
                         </>
                       )}
@@ -1780,7 +1868,7 @@ export function ImageToolsStudio({
             />
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-violet-100 pt-3">
               <div>
-                <p className="text-xs font-black text-slate-500">{creditCost} credits</p>
+                <p className="text-xs font-black text-slate-500">{quoteLabel}</p>
                 <p className="mt-1 text-[11px] font-bold text-slate-400">{activeCount} active reference{activeCount === 1 ? '' : 's'}</p>
               </div>
               <button
@@ -1844,7 +1932,6 @@ export function ImageToolsStudio({
                 <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-500">Mockup source</p>
                 <h3 className="mt-1 text-2xl font-black text-slate-950">Upload design and choose surface</h3>
               </div>
-              <span className="rounded-full bg-violet-50 px-3 py-1 text-xs font-black text-violet-700">{mockupModel === 'nano-banana-pro' ? 'Pro' : 'Fast'}</span>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
@@ -1949,7 +2036,7 @@ export function ImageToolsStudio({
               className="min-h-[132px] w-full resize-none bg-transparent text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400"
             />
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-violet-100 pt-3">
-              <span className="text-xs font-black text-slate-500">{creditCost} credits</span>
+              <span className="text-xs font-black text-slate-500">{quoteLabel}</span>
               <button
                 type="button"
                 disabled={isGenerating}
@@ -1962,24 +2049,9 @@ export function ImageToolsStudio({
             {error && <p className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</p>}
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2">
             <ToolSelect label="Quality" value={quality} options={qualities} onChange={setQuality} />
             <ToolSelect label="Style" value={style} options={styles} onChange={setStyle} />
-            <div className="rounded-[24px] border border-violet-100 bg-white/65 p-3">
-              <p className="px-1 text-xs font-black uppercase tracking-[0.16em] text-violet-500">Model</p>
-              <div className="mt-2 grid gap-2">
-                {(['nano-banana', 'nano-banana-pro'] as const).map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setMockupModel(item)}
-                    className={`rounded-2xl px-3 py-2 text-sm font-black transition ${mockupModel === item ? 'bg-violet-600 text-white' : 'bg-white text-slate-600 hover:bg-violet-50'}`}
-                  >
-                    {item === 'nano-banana-pro' ? 'Pro' : 'Fast'}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
 
           {imageOutputs.some((item) => item.toolId === 'mockup') ? (
@@ -2026,7 +2098,6 @@ export function ImageToolsStudio({
             <span className="block font-black">{tool.title}</span>
             <span className="mt-2 block text-xs leading-5 opacity-75">{tool.description}</span>
             <ToolPreview previewId={tool.id} compact />
-            <span className="mt-3 inline-flex rounded-full bg-white/80 px-3 py-1 text-xs font-black text-violet-700">{tool.cost}+ credits</span>
           </button>
         ))}
       </div>
@@ -2071,7 +2142,9 @@ export function ImageToolsStudio({
                 className="min-h-[165px] w-full resize-none bg-transparent text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400"
               />
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-violet-100 pt-3">
-                <span className="text-xs font-black text-slate-500">{creditCost} credits</span>
+                <span className="text-xs font-black text-slate-500">
+                  {quoteLabel}
+                </span>
                 <button
                   type="button"
                   disabled={isGenerating}
@@ -2089,6 +2162,15 @@ export function ImageToolsStudio({
               <ToolSelect label="Quality" value={quality} options={qualities} onChange={setQuality} />
               <ToolSelect label="Style" value={style} options={styles} onChange={setStyle} />
             </div>
+
+            {textOnlyImageTools.has(selectedTool.id) && outputBrief && (
+              <div className="rounded-[24px] border border-violet-100 bg-white/75 p-4">
+                <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap text-sm leading-6 text-slate-700">{outputBrief}</pre>
+                <button type="button" onClick={() => makeDownload(generatedImageName || `savi-${selectedTool.id}.txt`, outputBrief)} className="mt-3 rounded-full border border-violet-200 bg-white px-4 py-2 text-xs font-black text-slate-800">
+                  Download text
+                </button>
+              </div>
+            )}
 
             {imageOutputs.some((item) => item.toolId === selectedTool.id) && (
               <OutputGallery
@@ -2108,7 +2190,6 @@ export function ImageToolsStudio({
       </>
       )}
 
-      <UpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
     </section>
   );
 }

@@ -7,13 +7,21 @@ import type { SidebarMode } from '@/components/SaviSidebar';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { getSaviAgentTool, type SaviAgentPlan, type SaviAgentToolId } from '@/lib/ai/saviAgent';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
+import { createSaviRadioScript } from '@/lib/voice/radioScript';
+import {
+  applyAuthoritativeBalance,
+  clearSaviClientRequestId,
+  createSaviClientRequestId,
+  createSaviRequestScope,
+  readPrivateTextAsset,
+  revokeOwnedObjectUrl
+} from '@/lib/savi/clientGeneration';
 
 type AssistantTool =
   | 'smart_chat'
   | 'image_text'
   | 'voice_tts'
   | 'radio_talk'
-  | 'video_script'
   | 'video_studio'
   | 'file_studio'
   | 'image_studio';
@@ -24,7 +32,9 @@ type PendingAction = {
   title: string;
   mode: ToolMode;
   prompt: string;
-  cost: number;
+  // This is populated only by the authenticated pricing endpoint immediately
+  // before confirmation. It is never a client-side pricing authority.
+  cost?: number;
   reason: string;
   canRunInChat: boolean;
   toolId?: string;
@@ -35,6 +45,7 @@ type PendingAction = {
   attachments?: ChatAttachment[];
   voice?: string;
   style?: string;
+  radioSource?: 'topic' | 'script';
   intro?: string;
   agentToolId?: SaviAgentToolId;
   requiredInput?: 'none' | 'text' | 'image' | 'pdf' | 'video' | 'audio';
@@ -45,7 +56,6 @@ type PendingAction = {
 
 type AgentPlanResponse = SaviAgentPlan & {
   title: string;
-  creditCost: number;
   requiredInput: PendingAction['requiredInput'];
   output: ChatResult['type'] | 'chat';
 };
@@ -120,20 +130,11 @@ const WELCOME_HEADLINES = [
   'Ready when your idea is.'
 ];
 
-const PDF_TOOL_COSTS: Record<string, number> = {
-  organize_pdf: 35,
-  merge_pdf: 25,
-  pdf_to_jpg: 45,
-  contract_summary: 5,
-  explain_document: 4,
-  translate_summary: 7,
-  pdf_podcast: 8
-};
-
 const PDF_TOOL_TITLES: Record<string, string> = {
   organize_pdf: 'Organize PDF pages',
   merge_pdf: 'Merge PDF',
   pdf_to_jpg: 'PDF to JPG',
+  extract_images: 'Extract PDF images',
   contract_summary: 'Contract Summary',
   explain_document: 'Explain Document',
   translate_summary: 'Translate PDF',
@@ -151,10 +152,16 @@ function loadStoredMessages() {
     const value = window.localStorage.getItem(CHAT_STORAGE_KEY);
     if (!value) return [];
     const parsed = JSON.parse(value) as ChatMessage[];
-    return Array.isArray(parsed) ? parsed.slice(-MAX_MEMORY_MESSAGES) : [];
+    return Array.isArray(parsed) ? parsed.map(stripLegacyClientQuote).slice(-MAX_MEMORY_MESSAGES) : [];
   } catch {
     return [];
   }
+}
+
+function stripLegacyClientQuote(message: ChatMessage): ChatMessage {
+  if (!message.pendingAction) return message;
+  const { cost: _legacyClientQuote, ...pendingAction } = message.pendingAction;
+  return { ...message, pendingAction };
 }
 
 function loadStoredOutputs() {
@@ -208,6 +215,11 @@ function userLanguage(text: string): 'fa' | 'en' {
 
 function localizedText(language: 'fa' | 'en', fa: string, en: string) {
   return language === 'fa' ? fa : en;
+}
+
+function voiceScriptForAction(action: PendingAction) {
+  if (action.tool !== 'radio_talk' || action.radioSource === 'script') return action.prompt.trim();
+  return createSaviRadioScript(action.prompt, 'solo', 'short');
 }
 
 function wantsPdfPageOrganization(message: string) {
@@ -399,6 +411,9 @@ function inferToolIdFromImagePrompt(message: string, hasImage: boolean) {
 
 function inferPdfToolId(message: string) {
   const lower = message.toLowerCase();
+  if (isMatch(lower, ['merge', 'combine', 'join pdf', 'ادغام', 'یکی کن'])) return 'merge_pdf';
+  if (isMatch(lower, ['pdf to jpg', 'convert to jpg', 'export pages', 'تبدیل به jpg', 'تبدیل به عکس'])) return 'pdf_to_jpg';
+  if (isMatch(lower, ['extract images', 'extract image', 'خارج کردن عکس', 'استخراج عکس'])) return 'extract_images';
   if (parseSwapPages(lower)) return 'organize_pdf';
   if (wantsPdfPageOrganization(lower)) return 'organize_pdf';
   if (wantsPdfVoice(lower)) return 'pdf_podcast';
@@ -425,7 +440,6 @@ function inferActionWithAttachments(message: string, attachments: ChatAttachment
         title: PDF_TOOL_TITLES.organize_pdf,
         mode: 'Files',
         prompt: prompt || 'Organize this PDF.',
-        cost: 0,
         reason: localizedText(
           language,
           `فایل ${pdfAttachments[0].name} را دارم. فقط ترتیب دقیق صفحات را بگو؛ مثلا «صفحه ۱ و ۲ را جابه‌جا کن».`,
@@ -445,15 +459,14 @@ function inferActionWithAttachments(message: string, attachments: ChatAttachment
       title: PDF_TOOL_TITLES[toolId] || 'PDF Tool',
       mode: 'Files',
       prompt: prompt || (toolId === 'organize_pdf' ? 'Organize this PDF.' : defaultPdfPrompt(toolId, language)),
-      cost: PDF_TOOL_COSTS[toolId] ?? PDF_TOOL_COSTS.explain_document,
       reason: localizedText(language, `فایل ${pdfAttachments[0].name} آماده است. همین‌جا خروجی را می‌سازم.`, `I can process ${pdfAttachments[0].name} in this chat and return the result here.`),
       canRunInChat: true,
       toolId,
       language,
       swapPages: swapPages || undefined,
       followUpVoice: wantsPdfVoice(prompt),
-      attachmentIds: [pdfAttachments[0].id],
-      attachments: [pdfAttachments[0]]
+      attachmentIds: toolId === 'merge_pdf' ? pdfAttachments.map((item) => item.id) : [pdfAttachments[0].id],
+      attachments: toolId === 'merge_pdf' ? pdfAttachments : [pdfAttachments[0]]
     };
   }
 
@@ -465,7 +478,6 @@ function inferActionWithAttachments(message: string, attachments: ChatAttachment
         title: 'Image to Video',
         mode: 'Video',
         prompt: prompt || 'Animate this image into a short polished SAVI video.',
-        cost: 900,
         reason: `I can use the uploaded image as a video reference and create the clip here.`,
         canRunInChat: true,
         toolId: 'image_video',
@@ -481,7 +493,6 @@ function inferActionWithAttachments(message: string, attachments: ChatAttachment
       title: toolId === 'remove_background' ? 'Remove Background' : toolId === 'remove_object' ? 'Remove Object' : toolId === 'change_style' ? 'Change Style' : toolId === 'mockup' ? 'Mockup' : 'Edit Image',
       mode: 'Images',
       prompt: prompt || 'Edit this image while preserving the original subject.',
-      cost: toolId === 'remove_background' ? 200 : toolId === 'remove_object' ? 250 : toolId === 'change_style' ? 250 : toolId === 'mockup' ? 160 : 200,
       reason: `I can use the uploaded image and create the output here.`,
       canRunInChat: true,
       toolId,
@@ -497,7 +508,6 @@ function inferActionWithAttachments(message: string, attachments: ChatAttachment
       title: 'Video Tool',
       mode: 'Video',
       prompt: prompt || 'Use this reference video and create a polished SAVI output.',
-      cost: 900,
       reason: `I can send this reference to the video tool. I will ask confirmation before generation.`,
       canRunInChat: true,
       toolId: 'extend',
@@ -557,7 +567,12 @@ function loadStoredSessions(): ChatSession[] {
     const value = window.localStorage.getItem(CHAT_SESSIONS_KEY);
     if (value) {
       const parsed = JSON.parse(value) as ChatSession[];
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.map((session) => ({
+          ...session,
+          messages: session.messages.map(stripLegacyClientQuote)
+        }));
+      }
     }
 
     const oldMessages = loadStoredMessages();
@@ -635,7 +650,6 @@ function actionFromTemplate(template: TemplateItem, prompt: string): PendingActi
       title: template.title,
       mode: 'Files',
       prompt,
-      cost: template.credits,
       reason: 'This needs a PDF. I will open the exact file workflow for you.',
       canRunInChat: false
     };
@@ -648,7 +662,6 @@ function actionFromTemplate(template: TemplateItem, prompt: string): PendingActi
       title: template.title,
       mode: 'Images',
       prompt,
-      cost: template.credits,
       reason: 'This needs an image upload. I will open the image workflow for you.',
       canRunInChat: false
     };
@@ -661,24 +674,10 @@ function actionFromTemplate(template: TemplateItem, prompt: string): PendingActi
       title: 'Text to Speech',
       mode: 'Voice',
       prompt,
-      cost: 30,
       reason: 'I can make this into downloadable audio.',
       canRunInChat: true,
       voice: 'Kore',
       style: 'natural text to speech, warm clear delivery'
-    };
-  }
-
-  if (template.id === 'video-ad-script') {
-    return {
-      id: makeId(),
-      tool: 'video_script',
-      title: template.title,
-      mode: 'Video',
-      prompt,
-      cost: template.credits,
-      reason: 'This script can be generated directly here.',
-      canRunInChat: true
     };
   }
 
@@ -688,7 +687,6 @@ function actionFromTemplate(template: TemplateItem, prompt: string): PendingActi
     title: template.title,
     mode: 'Ask AI',
     prompt,
-    cost: template.credits,
     reason: 'This text workflow can run directly here.',
     canRunInChat: true
   };
@@ -716,7 +714,6 @@ function detectAction(message: string, template?: TemplateItem): PendingAction {
       title: toolId ? PDF_TOOL_TITLES[toolId] : 'File tools',
       mode: 'Files',
       prompt: prompt || (toolId ? defaultPdfPrompt(toolId, language) : ''),
-      cost: toolId ? PDF_TOOL_COSTS[toolId] : 0,
       reason: 'This needs upload, preview, or page controls.',
       canRunInChat: false,
       toolId,
@@ -732,7 +729,6 @@ function detectAction(message: string, template?: TemplateItem): PendingAction {
       title: 'Image editing',
       mode: 'Images',
       prompt,
-      cost: 200,
       reason: 'This needs an uploaded image and edit controls.',
       canRunInChat: false
     };
@@ -745,7 +741,6 @@ function detectAction(message: string, template?: TemplateItem): PendingAction {
       title: 'Text to Image',
       mode: 'Images',
       prompt,
-      cost: 125,
       reason: 'I can create this image directly in chat.',
       canRunInChat: true
     };
@@ -758,7 +753,6 @@ function detectAction(message: string, template?: TemplateItem): PendingAction {
       title: 'Radio Talk AI',
       mode: 'Voice',
       prompt,
-      cost: 120,
       reason: 'I can shape this into a hosted radio segment with audio.',
       canRunInChat: true
     };
@@ -771,7 +765,6 @@ function detectAction(message: string, template?: TemplateItem): PendingAction {
       title: 'Text to Speech',
       mode: 'Voice',
       prompt,
-      cost: 30,
       reason: 'I can turn the text into downloadable audio.',
       canRunInChat: true
     };
@@ -779,16 +772,27 @@ function detectAction(message: string, template?: TemplateItem): PendingAction {
 
   if (isMatch(prompt, ['video', 'veo', 'reel', 'animate', 'ویدیو', 'ويديو', 'کلیپ', 'ریل', 'ریلز'])) {
     const wantsScript = isMatch(prompt, ['script', 'ad script', 'سناریو', 'اسکریپت', 'تبلیغ']);
+    if (wantsScript) {
+      return {
+        id: makeId(),
+        tool: 'smart_chat',
+        title: 'Ask SAVI',
+        mode: 'Ask AI',
+        prompt,
+        reason: 'I can help plan the script in chat.',
+        canRunInChat: true
+      };
+    }
+
     return {
       id: makeId(),
-      tool: wantsScript ? 'video_script' : 'video_studio',
-      title: wantsScript ? 'Video ad script' : 'Video tools',
+      tool: 'video_studio',
+      title: 'Video tools',
       mode: 'Video',
       prompt,
-      cost: wantsScript ? 5 : 900,
-      reason: wantsScript ? 'I can write the script here.' : 'Video needs duration, ratio, references, and confirmation.',
+      reason: 'Video needs duration, ratio, references, and confirmation.',
       canRunInChat: true,
-      toolId: wantsScript ? undefined : 'text_video'
+      toolId: 'text_video'
     };
   }
 
@@ -798,25 +802,25 @@ function detectAction(message: string, template?: TemplateItem): PendingAction {
     title: 'Ask SAVI',
     mode: 'Ask AI',
     prompt,
-    cost: 0,
     reason: 'Normal chat is free.',
     canRunInChat: true
   };
 }
 
 function agentToolToAssistantTool(toolId: SaviAgentToolId): AssistantTool {
-  if (['text_to_image', 'story_sketch', 'text_design'].includes(toolId)) return 'image_text';
+  if (['text_to_image', 'story_sketch', 'text_design', 'instagram_post', 'product_prompt'].includes(toolId)) return 'image_text';
   if (['edit_image', 'remove_background', 'remove_object', 'change_style', 'mockup', 'visual_mixer', 'sketch_to_image', 'product_photo', 'variations'].includes(toolId)) return 'image_studio';
   if (toolId === 'text_to_speech') return 'voice_tts';
   if (toolId === 'radio_talk') return 'radio_talk';
-  if (['text_video', 'story_video', 'image_video', 'first_last_video', 'product_ad_video', 'social_reel_video', 'extend_video'].includes(toolId)) return 'video_studio';
-  if (['merge_pdf', 'organize_pdf', 'pdf_to_jpg', 'extract_pdf_images', 'contract_summary', 'explain_document', 'translate_pdf', 'pdf_podcast'].includes(toolId)) return 'file_studio';
-  if (toolId === 'video_script') return 'video_script';
+  if (['text_video', 'story_video', 'image_video', 'first_last', 'product_ad', 'social_reel', 'extend'].includes(toolId)) return 'video_studio';
+  if (['merge_pdf', 'organize_pdf', 'pdf_to_jpg', 'extract_images', 'contract_summary', 'explain_document', 'translate_summary', 'pdf_podcast'].includes(toolId)) return 'file_studio';
   return 'smart_chat';
 }
 
-function agentToolApiId(toolId: SaviAgentToolId) {
-  const mapping: Partial<Record<SaviAgentToolId, string>> = {
+function agentToolApiId(toolId: string) {
+  // Older browser-saved actions can retain the former UI aliases. New plans
+  // always use the canonical server tool IDs above.
+  const mapping: Record<string, string> = {
     first_last_video: 'first_last',
     product_ad_video: 'product_ad',
     social_reel_video: 'social_reel',
@@ -839,6 +843,8 @@ function actionFromAgentPlan(plan: AgentPlanResponse, attachments: ChatAttachmen
   const tool = getSaviAgentTool(plan.toolId);
   const toolId = agentToolApiId(plan.toolId);
   const actionAttachments = toolAttachmentsForPlan(plan, attachments);
+  const attachmentLimit = plan.toolId === 'mockup' ? 2 : plan.toolId === 'visual_mixer' ? 6 : plan.toolId === 'merge_pdf' ? 12 : 3;
+  const selectedAttachments = actionAttachments.slice(0, attachmentLimit);
   const assistantTool = agentToolToAssistantTool(plan.toolId);
   const requiresUpload = ['image', 'pdf', 'video', 'audio'].includes(plan.requiredInput || tool.requiredInput);
   const hasRequiredInput = !requiresUpload || actionAttachments.length > 0;
@@ -851,16 +857,15 @@ function actionFromAgentPlan(plan: AgentPlanResponse, attachments: ChatAttachmen
     title: tool.title,
     mode: tool.category === 'image' ? 'Images' : tool.category === 'voice' ? 'Voice' : tool.category === 'video' ? 'Video' : tool.category === 'file' ? 'Files' : 'Ask AI',
     prompt: plan.prompt,
-    cost: plan.creditCost,
     reason: plan.reply,
     intro: plan.reply,
     canRunInChat: shouldRunInChat,
-    toolId: assistantTool === 'smart_chat' || assistantTool === 'video_script' || assistantTool === 'voice_tts' || assistantTool === 'radio_talk' ? undefined : toolId,
+    toolId: assistantTool === 'smart_chat' || assistantTool === 'voice_tts' || assistantTool === 'radio_talk' ? undefined : toolId,
     language,
     swapPages: plan.pageA && plan.pageB ? [plan.pageA, plan.pageB] : undefined,
     followUpVoice: plan.nextToolId === 'text_to_speech' || plan.nextToolId === 'radio_talk',
-    attachments: actionAttachments.slice(0, plan.toolId === 'mockup' ? 2 : 3),
-    attachmentIds: actionAttachments.slice(0, plan.toolId === 'mockup' ? 2 : 3).map((item) => item.id),
+    attachments: selectedAttachments,
+    attachmentIds: selectedAttachments.map((item) => item.id),
     voice: plan.voice,
     style: plan.style,
     agentToolId: plan.toolId,
@@ -880,7 +885,7 @@ export function AskSaviChat({
   initialMessage = '',
   initialMessageLaunchKey = 0
 }: {
-  credits: number;
+  credits: number | null;
   onCreditsChange: (credits: number) => void;
   onOpenTool: (mode: SidebarMode, template?: TemplateItem) => void;
   template?: TemplateItem;
@@ -1151,7 +1156,6 @@ export function AskSaviChat({
         id: makeId(),
         title: PDF_TOOL_TITLES[toolId] || pending.title,
         prompt: pending.prompt || defaultPdfPrompt(toolId, language),
-        cost: PDF_TOOL_COSTS[toolId] ?? pending.cost,
         reason: localizedText(
           language,
           toolId === 'translate_summary'
@@ -1223,6 +1227,7 @@ export function AskSaviChat({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message,
+        clientRequestId: createSaviClientRequestId(),
         history: conversationHistory(),
         attachments: Array.from(attachmentMap.values()).map((item) => ({
           id: item.id,
@@ -1327,7 +1332,7 @@ export function AskSaviChat({
       }
     }
 
-    if (action.tool === 'smart_chat' && action.cost === 0) {
+    if (action.tool === 'smart_chat') {
       await runFreeChat(clean, conversationHistory());
       return;
     }
@@ -1407,7 +1412,6 @@ export function AskSaviChat({
               ...action,
               id: makeId(),
               canRunInChat: true,
-              cost: PDF_TOOL_COSTS.organize_pdf,
               reason: localizedText(
                 action.language || userLanguage(clean),
                 `فایل ${pdf.name} آماده است. صفحه ${swapPages[0]} و ${swapPages[1]} را جابه‌جا می‌کنم و PDF جدید می‌دهم.`,
@@ -1457,7 +1461,6 @@ export function AskSaviChat({
           title: 'Edit image',
           description: 'Upload an image and describe the change you want.',
           inputType: 'Image',
-          credits: action.cost,
           category: 'Images',
           prompt: action.prompt
         });
@@ -1483,21 +1486,88 @@ export function AskSaviChat({
     ].slice(-MAX_MEMORY_MESSAGES));
   }
 
-  function addPendingAction(action: PendingAction) {
-    const { attachments: actionFiles, ...safeAction } = action;
+  function serverToolForAction(action: PendingAction) {
+    if (action.tool === 'voice_tts') return 'text_to_speech';
+    if (action.tool === 'radio_talk') return 'radio_talk';
+    if (action.tool === 'image_text') return action.agentToolId || 'text_to_image';
+    if (action.tool === 'image_studio' || action.tool === 'video_studio' || action.tool === 'file_studio') return action.toolId;
+    return undefined;
+  }
+
+  async function withAuthoritativeQuote(action: PendingAction) {
+    const serverToolId = serverToolForAction(action);
+    if (!serverToolId || !user) return { ...action, cost: undefined };
+
+    const actionFiles = getActionAttachments(action);
+    const referenceImageCount = actionFiles.filter((item) => item.kind === 'image' || item.kind === 'video').length;
+    const params = new URLSearchParams({
+      toolId: serverToolId,
+      referenceImageCount: String(referenceImageCount),
+      quality: action.quality || '1080',
+      aspectRatio: action.aspectRatio || '1:1',
+      duration: action.duration || '6',
+    textCharacters: String(Math.max(1, (action.tool === 'voice_tts' || action.tool === 'radio_talk' ? voiceScriptForAction(action) : action.prompt).length)),
+      pageCount: '1'
+    });
+
+    try {
+      const aiPdfTool = action.tool === 'file_studio' && ['contract_summary', 'explain_document', 'translate_summary', 'pdf_podcast'].includes(serverToolId);
+      const pdf = aiPdfTool ? actionFiles.find((item) => item.kind === 'pdf') : undefined;
+      const response = pdf
+        ? await (() => {
+            const form = new FormData();
+            form.append('toolId', serverToolId);
+            form.append('file', pdf.file);
+            return fetch('/api/pricing/quote', { method: 'POST', body: form, cache: 'no-store', credentials: 'same-origin' });
+          })()
+        : await fetch(`/api/pricing/quote?${params.toString()}`, { cache: 'no-store', credentials: 'same-origin' });
+      const quote = (await response.json().catch(() => ({}))) as { credits?: unknown };
+      if (!response.ok || typeof quote.credits !== 'number') throw new Error('quote unavailable');
+      return { ...action, cost: quote.credits };
+    } catch {
+      // The protected server route will refuse an unpriced configuration before
+      // it can reserve credits, so an unavailable quote never becomes a charge.
+      return { ...action, cost: undefined };
+    }
+  }
+
+  function pendingActionCopy(action: PendingAction) {
+    const language = action.language || userLanguage(action.prompt);
+    const quoteCopy = typeof action.cost === 'number'
+      ? localizedText(language, `هزینه: ${action.cost} credits. تایید کن تا انجامش بدهم.`, `Cost: ${action.cost} credits. Confirm when you want me to generate it.`)
+      : localizedText(language, 'قیمت فعلی هنوز آماده نیست؛ قبل از ساخت، quote امن را دوباره می‌گیرم.', 'The current quote is unavailable. I will refresh the secure quote before generating.');
+
+    return action.canRunInChat
+      ? `${action.intro || localizedText(language, `${action.title} آماده است.`, `${action.title} is ready.`)} ${quoteCopy}`
+      : localizedText(
+          language,
+          `${action.title} ابزار درست این کار است. ${typeof action.cost === 'number' ? `هزینه: ${action.cost} credits.` : 'قیمت هنگام باز کردن ابزار به‌صورت امن نمایش داده می‌شود.'} ${action.reason}`,
+          `${action.title} is the right tool. ${typeof action.cost === 'number' ? `Cost: ${action.cost} credits.` : 'The current price will be shown securely when the tool opens.'} ${action.reason}`
+        );
+  }
+
+  async function refreshPendingActionQuote(messageId: string, action: PendingAction) {
+    const pricedAction = await withAuthoritativeQuote(action);
+    setMessages((current) => updateMessage(current, messageId, {
+      content: pendingActionCopy(pricedAction),
+      pendingAction: pricedAction
+    }));
+  }
+
+  async function addPendingAction(action: PendingAction) {
+    const pricedAction = await withAuthoritativeQuote(action);
+
+    const { attachments: actionFiles, ...safeAction } = pricedAction;
     if (actionFiles?.length) {
       actionAttachmentStoreRef.current[action.id] = actionFiles;
       rememberActionAttachments(actionFiles);
     }
-    const language = action.language || userLanguage(action.prompt);
     setMessages((current) => [
       ...current,
       {
         id: makeId(),
         role: 'assistant' as const,
-        content: action.canRunInChat
-          ? `${action.intro || localizedText(language, `${action.title} آماده است.`, `${action.title} is ready.`)} ${localizedText(language, `هزینه: ${action.cost} credits. تایید کن تا انجامش بدهم.`, `Cost: ${action.cost} credits. Confirm when you want me to generate it.`)}`
-          : localizedText(language, `${action.title} ابزار درست این کار است. هزینه از ${action.cost} credits شروع می‌شود. ${action.reason}`, `${action.title} is the right tool. Estimated cost starts at ${action.cost} credits. ${action.reason}`),
+        content: pendingActionCopy(pricedAction),
         createdAt: Date.now(),
         pendingAction: safeAction
       }
@@ -1524,7 +1594,6 @@ export function AskSaviChat({
     }
 
     const settings = voiceSettingsFromText(clean);
-    const cost = toolDraft.tool === 'radio_talk' ? 120 : 30;
     const title = toolDraft.tool === 'radio_talk' ? 'Radio Talk AI' : 'Text to Speech';
     const prompt = toolDraft.text || clean;
     const language = toolDraft.language || userLanguage(prompt);
@@ -1536,12 +1605,12 @@ export function AskSaviChat({
       title,
       mode: 'Voice',
       prompt,
-      cost,
       reason: `Voice: ${settings.voice}. Style: ${settings.style}.`,
       canRunInChat: true,
       language,
       voice: settings.voice,
-      style: settings.style
+      style: settings.style,
+      radioSource: toolDraft.tool === 'radio_talk' ? 'topic' : undefined
     });
   }
 
@@ -1563,7 +1632,7 @@ export function AskSaviChat({
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, mode: 'Ask AI', history })
+        body: JSON.stringify({ message, mode: 'Ask AI', history, clientRequestId: createSaviClientRequestId() })
       });
       const data = (await response.json().catch(() => ({}))) as { response?: string; error?: string };
       if (!response.ok || !data.response) throw new Error(data.error || 'SAVI could not answer.');
@@ -1611,20 +1680,14 @@ export function AskSaviChat({
       return;
     }
 
-    if (credits < action.cost) {
-      setMessages((current) =>
-        updateMessage(current, messageId, {
-          pendingAction: undefined,
-          status: 'error',
-          content: `You need ${action.cost} credits for ${action.title}, but you only have ${credits}. Add credits to continue.`
-        })
-      );
-      return;
-    }
-
     if (isAuthLoading) return;
     if (!user) {
       signIn();
+      return;
+    }
+
+    if (serverToolForAction(action) && typeof action.cost !== 'number') {
+      await refreshPendingActionQuote(messageId, action);
       return;
     }
 
@@ -1637,9 +1700,43 @@ export function AskSaviChat({
       })
     );
 
+    let awaitingExistingJob = false;
     try {
       let result: ChatResult;
       const actionAttachments = getActionAttachments(action);
+      // Keep a retry tied to this exact confirmed action. The browser only stores
+      // its opaque request id; the server remains the credit and job authority.
+      const paidRequestScope = createSaviRequestScope('ask-action', [
+        action.id,
+        action.tool,
+        action.toolId,
+        action.agentToolId,
+        action.prompt,
+        action.aspectRatio,
+        action.quality,
+        action.duration,
+        action.voice,
+        action.style,
+        actionAttachments.map((item) => `${item.id}:${item.name}:${item.mimeType}:${item.size}`).join('|')
+      ]);
+      const paidRequestId = () => createSaviClientRequestId(paidRequestScope);
+      const inspectPaidResponse = (response: Response) => {
+        if (response.status === 202) {
+          awaitingExistingJob = true;
+          return true;
+        }
+        clearSaviClientRequestId(paidRequestScope);
+        return false;
+      };
+      const processingMessage = localizedText(
+        action.language || userLanguage(action.prompt),
+        'این درخواست هنوز در حال پردازش است. چند لحظه دیگر دوباره اجرا را بزن؛ همان درخواست امن دوباره استفاده می‌شود و دوباره شارژ نمی‌شوی.',
+        'This request is still processing. Try it again in a moment; SAVI will safely reuse the same request without charging twice.'
+      );
+      let availableCredits: unknown;
+      const captureBalance = (payload: { availableCredits?: unknown }) => {
+        availableCredits = payload.availableCredits;
+      };
 
       if (action.tool === 'file_studio' && action.toolId) {
         const pdfAttachments = actionAttachments.filter((item) => item.kind === 'pdf');
@@ -1649,24 +1746,25 @@ export function AskSaviChat({
         if (['merge_pdf', 'pdf_to_jpg', 'extract_images'].includes(action.toolId)) {
           const formData = new FormData();
           formData.append('action', action.toolId);
+          formData.append('clientRequestId', paidRequestId());
           pdfAttachments.forEach((item) => formData.append('files', item.file));
           if (action.toolId === 'pdf_to_jpg') formData.append('pages', 'all');
           const response = await fetch('/api/file-tools/process', { method: 'POST', body: formData });
-          if (!response.ok) {
-            const data = (await response.json().catch(() => ({}))) as { error?: string };
+          if (inspectPaidResponse(response)) throw new Error(processingMessage);
+          const data = (await response.json().catch(() => ({}))) as { asset?: string; filename?: string; availableCredits?: number; error?: string };
+          if (!response.ok || !data.asset) {
             throw new Error(data.error || 'PDF processing failed.');
           }
-          const blob = await response.blob();
-          const url = URL.createObjectURL(blob);
           const fileNames: Record<string, string> = {
             merge_pdf: 'savi-merged.pdf',
             pdf_to_jpg: `${pdf.name.replace(/\.pdf$/i, '')}-jpg-pages.zip`,
             extract_images: `${pdf.name.replace(/\.pdf$/i, '')}-images.zip`
           };
+          captureBalance(data);
           result = {
             type: 'file',
-            url,
-            filename: fileNames[action.toolId] || 'savi-file-output.zip',
+            url: data.asset,
+            filename: data.filename || fileNames[action.toolId] || 'savi-file-output.zip',
             helper: localizedText(action.language || userLanguage(action.prompt), 'فایل آماده دانلود است.', 'Your file is ready to download.')
           };
         } else if (action.toolId === 'organize_pdf') {
@@ -1679,20 +1777,21 @@ export function AskSaviChat({
           formData.append('action', 'organize_pdf');
           formData.append('files', pdf.file);
           formData.append('swapPages', JSON.stringify(swapPages));
+          formData.append('clientRequestId', paidRequestId());
           const response = await fetch('/api/file-tools/process', {
             method: 'POST',
             body: formData
           });
-          if (!response.ok) {
-            const data = (await response.json().catch(() => ({}))) as { error?: string };
+          if (inspectPaidResponse(response)) throw new Error(processingMessage);
+          const data = (await response.json().catch(() => ({}))) as { asset?: string; filename?: string; availableCredits?: number; error?: string };
+          if (!response.ok || !data.asset) {
             throw new Error(data.error || 'PDF organization failed.');
           }
-          const blob = await response.blob();
-          const url = URL.createObjectURL(blob);
+          captureBalance(data);
           result = {
             type: 'file',
-            url,
-            filename: `${pdf.name.replace(/\.pdf$/i, '')}-organized.pdf`,
+            url: data.asset,
+            filename: data.filename || `${pdf.name.replace(/\.pdf$/i, '')}-organized.pdf`,
             helper: localizedText(
               action.language || userLanguage(action.prompt),
               action.followUpVoice ? 'PDF مرتب‌شده آماده است. حالا اگر تایید کنی، می‌توانم متن همین PDF را به پادکست رادیویی یا TTS تبدیل کنم.' : 'PDF مرتب‌شده آماده است.',
@@ -1704,16 +1803,22 @@ export function AskSaviChat({
           formData.append('file', pdf.file);
           formData.append('toolId', action.toolId);
           formData.append('prompt', action.prompt);
+          formData.append('clientRequestId', paidRequestId());
           const response = await fetch('/api/file-tools/ai', {
             method: 'POST',
             body: formData
           });
-          const data = (await response.json().catch(() => ({}))) as { result?: string; error?: string };
-          if (!response.ok || !data.result) throw new Error(data.error || 'PDF processing failed.');
+          if (inspectPaidResponse(response)) throw new Error(processingMessage);
+          const data = (await response.json().catch(() => ({}))) as { result?: string; asset?: string; filename?: string; availableCredits?: number; error?: string };
+          if (!response.ok || (!data.result && !data.asset)) throw new Error(data.error || 'PDF processing failed.');
+          const documentText = data.result || await readPrivateTextAsset(data.asset);
+          if (!documentText) throw new Error('SAVI could not load the document result.');
+          captureBalance(data);
           result = {
             type: 'text',
-            text: data.result,
-            filename: `savi-${action.toolId}.txt`,
+            text: documentText,
+            url: data.asset,
+            filename: data.filename || `savi-${action.toolId}.txt`,
             helper: localizedText(action.language || userLanguage(action.prompt), 'نتیجه سند آماده است.', 'Document result ready.')
           };
         }
@@ -1729,6 +1834,7 @@ export function AskSaviChat({
             aspectRatio: action.aspectRatio || '1:1',
             quality: action.quality || '1080',
             style: 'Premium realistic SAVI edit, preserve original image where requested',
+            clientRequestId: paidRequestId(),
             referenceImages: imageAttachments.map((item) => ({
               data: item.base64,
               mimeType: item.mimeType,
@@ -1736,8 +1842,10 @@ export function AskSaviChat({
             }))
           })
         });
-        const data = (await response.json().catch(() => ({}))) as { image?: string; filename?: string; error?: string };
+        if (inspectPaidResponse(response)) throw new Error(processingMessage);
+        const data = (await response.json().catch(() => ({}))) as { image?: string; filename?: string; availableCredits?: number; error?: string };
         if (!response.ok || !data.image) throw new Error(data.error || 'Image editing failed.');
+        captureBalance(data);
         result = {
           type: 'image',
           url: data.image,
@@ -1754,8 +1862,9 @@ export function AskSaviChat({
             toolId: action.toolId,
             ratio: action.aspectRatio === '16:9' ? '16:9' : '9:16',
             duration: action.duration || '6',
-            quality: action.quality || '720',
+            quality: '720',
             withAudio: true,
+            clientRequestId: paidRequestId(),
             references: references.map((item) => ({
               data: item.base64,
               mimeType: item.mimeType,
@@ -1763,8 +1872,10 @@ export function AskSaviChat({
             }))
           })
         });
-        const data = (await response.json().catch(() => ({}))) as { video?: string; filename?: string; error?: string };
+        if (inspectPaidResponse(response)) throw new Error(processingMessage);
+        const data = (await response.json().catch(() => ({}))) as { video?: string; filename?: string; availableCredits?: number; error?: string };
         if (!response.ok || !data.video) throw new Error(data.error || 'Video generation failed.');
+        captureBalance(data);
         result = {
           type: 'video',
           url: data.video,
@@ -1772,37 +1883,65 @@ export function AskSaviChat({
           helper: 'Video ready.'
         };
       } else if (action.tool === 'image_text') {
-        const response = await fetch('/api/image/generate', {
+        const isTextOutput = action.agentToolId === 'instagram_post' || action.agentToolId === 'product_prompt';
+        const imageAttachment = actionAttachments.find((item) => item.kind === 'image');
+        const response = await fetch(isTextOutput ? '/api/text/generate' : '/api/image/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: action.prompt,
-            toolId: action.agentToolId || 'text_to_image',
-            aspectRatio: action.aspectRatio || '1:1',
-            quality: action.quality || '1080',
-            style: 'Realistic premium SAVI image'
-          })
+          body: JSON.stringify(
+            isTextOutput
+              ? {
+                  prompt: action.prompt,
+                  toolId: action.agentToolId,
+                  clientRequestId: paidRequestId(),
+                  referenceImage: imageAttachment
+                    ? { data: imageAttachment.base64, mimeType: imageAttachment.mimeType, name: imageAttachment.name }
+                    : undefined
+                }
+              : {
+                  prompt: action.prompt,
+                  toolId: action.agentToolId || 'text_to_image',
+                  aspectRatio: action.aspectRatio || '1:1',
+                  quality: action.quality || '1080',
+                  style: 'Realistic premium SAVI image',
+                  clientRequestId: paidRequestId()
+                }
+          )
         });
-        const data = (await response.json().catch(() => ({}))) as { image?: string; filename?: string; error?: string };
-        if (!response.ok || !data.image) throw new Error(data.error || 'Image generation failed.');
-        result = {
-          type: 'image',
-          url: data.image,
-          filename: data.filename || 'savi-chat-image.png',
-          helper: 'Image ready.'
-        };
+        if (inspectPaidResponse(response)) throw new Error(processingMessage);
+        const data = (await response.json().catch(() => ({}))) as { image?: string; result?: string; asset?: string; filename?: string; availableCredits?: number; error?: string };
+        if (!response.ok || (isTextOutput ? (!data.result && !data.asset) : !data.image)) throw new Error(data.error || 'Image generation failed.');
+        captureBalance(data);
+        result = isTextOutput
+          ? {
+              type: 'text',
+              text: data.result || await readPrivateTextAsset(data.asset),
+              url: data.asset,
+              filename: data.filename || `savi-${action.agentToolId}.txt`,
+              helper: 'Text output ready.'
+            }
+          : {
+              type: 'image',
+              url: data.image,
+              filename: data.filename || 'savi-chat-image.png',
+              helper: 'Image ready.'
+            };
       } else if (action.tool === 'voice_tts') {
         const response = await fetch('/api/voice/radio', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            toolId: 'text_to_speech',
+            clientRequestId: paidRequestId(),
             script: action.prompt,
             voice: action.voice || 'Kore',
             style: action.style || 'natural text to speech, exact wording, warm clear delivery'
           })
         });
-        const data = (await response.json().catch(() => ({}))) as { audio?: string; filename?: string; error?: string };
+        if (inspectPaidResponse(response)) throw new Error(processingMessage);
+        const data = (await response.json().catch(() => ({}))) as { audio?: string; filename?: string; availableCredits?: number; error?: string };
         if (!response.ok || !data.audio) throw new Error(data.error || 'Voice generation failed.');
+        captureBalance(data);
         result = {
           type: 'audio',
           text: action.prompt,
@@ -1811,32 +1950,27 @@ export function AskSaviChat({
           helper: 'Audio ready.'
         };
       } else if (action.tool === 'radio_talk') {
-        const scriptResponse = await fetch('/api/ai/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: `Turn this into a short, natural SAVI radio podcast script. Do not mention tool settings or duration names. Topic:\n\n${action.prompt}`,
-            mode: 'Voice',
-            templateId: 'radio_talk'
-          })
-        });
-        const scriptData = (await scriptResponse.json().catch(() => ({}))) as { response?: string; error?: string };
-        if (!scriptResponse.ok || !scriptData.response) throw new Error(scriptData.error || 'Radio script failed.');
+        const script = voiceScriptForAction(action);
+        if (!script) throw new Error('Write a topic or script first.');
 
         const audioResponse = await fetch('/api/voice/radio', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            script: scriptData.response,
+            toolId: 'radio_talk',
+            clientRequestId: paidRequestId(),
+            script,
             voice: action.voice || 'Puck',
             style: action.style || 'warm energetic radio host, natural delivery'
           })
         });
-        const audioData = (await audioResponse.json().catch(() => ({}))) as { audio?: string; filename?: string; error?: string };
+        if (inspectPaidResponse(audioResponse)) throw new Error(processingMessage);
+        const audioData = (await audioResponse.json().catch(() => ({}))) as { audio?: string; filename?: string; availableCredits?: number; error?: string };
         if (!audioResponse.ok || !audioData.audio) throw new Error(audioData.error || 'Radio audio generation failed.');
+        captureBalance(audioData);
         result = {
           type: 'audio',
-          text: scriptData.response,
+          text: script,
           url: audioData.audio,
           filename: audioData.filename || 'savi-radio-talk.wav',
           helper: 'Radio podcast ready.'
@@ -1846,12 +1980,10 @@ export function AskSaviChat({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            message:
-              action.tool === 'video_script'
-                ? `Create a useful video ad script with hook, scenes, voiceover, captions, and CTA:\n\n${action.prompt}`
-                : action.prompt,
+            message: action.prompt,
             mode: action.mode,
-            templateId: action.tool
+            templateId: action.tool,
+            clientRequestId: createSaviClientRequestId()
           })
         });
         const data = (await response.json().catch(() => ({}))) as { response?: string; error?: string };
@@ -1882,7 +2014,7 @@ export function AskSaviChat({
         { id: messageId, role: 'assistant', createdAt: Date.now(), content: completed.content || '', result } as ChatMessage,
         ...current
       ].slice(0, 10));
-      onCreditsChange(credits - action.cost);
+      applyAuthoritativeBalance(availableCredits, onCreditsChange);
 
       if (action.tool === 'file_studio' && action.toolId === 'pdf_podcast' && result.text) {
         const language = action.language || userLanguage(action.prompt);
@@ -1892,20 +2024,21 @@ export function AskSaviChat({
           title: 'Radio Talk AI',
           mode: 'Voice',
           prompt: result.text,
-          cost: 120,
           reason: localizedText(language, 'اسکریپت پادکست آماده است. می‌توانم آن را با صدای رادیویی بسازم.', 'The podcast script is ready. I can turn it into radio audio.'),
           intro: localizedText(language, 'اگر صدا هم می‌خواهی، آماده‌ام نسخه‌ی رادیویی را بسازم.', 'If you want audio too, I can create the radio version next.'),
           canRunInChat: true,
           language,
           voice: 'Puck',
-          style: 'warm professional radio host, natural delivery'
+          style: 'warm professional radio host, natural delivery',
+          radioSource: 'script'
         });
       }
     } catch (error) {
       setMessages((current) =>
         updateMessage(current, messageId, {
           status: 'error',
-          content: error instanceof Error ? error.message : 'SAVI could not finish this action.'
+          content: error instanceof Error ? error.message : 'SAVI could not finish this action.',
+          pendingAction: awaitingExistingJob ? action : undefined
         })
       );
     } finally {
@@ -1975,7 +2108,7 @@ export function AskSaviChat({
   function removeAttachment(id: string) {
     setAttachments((current) => {
       const item = current.find((attachment) => attachment.id === id);
-      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      revokeOwnedObjectUrl(item?.previewUrl);
       return current.filter((attachment) => attachment.id !== id);
     });
   }
@@ -2058,7 +2191,7 @@ export function AskSaviChat({
                           <p className="mt-1 text-xs leading-5 text-white/48">{message.pendingAction.reason}</p>
                         </div>
                         <span className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-black">
-                          {message.pendingAction.cost} credits
+                          {typeof message.pendingAction.cost === 'number' ? `${message.pendingAction.cost} credits` : 'Quote required'}
                         </span>
                       </div>
                       <div className="mt-4 flex flex-wrap gap-2">

@@ -1,30 +1,44 @@
-import { NextResponse } from 'next/server';
-import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { promisify } from 'node:util';
+import { NextRequest, NextResponse } from 'next/server';
+import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import {
+  estimateSaviVoiceReservationSeconds,
+  getConfiguredTtsModel,
+  SAVI_TEXT_TO_IMAGE_PROVIDER,
+  SAVI_VOICE_TOOL_IDS
+} from '@/lib/pricing/saviPricing';
+import { runProtectedOperation } from '@/lib/savi/protectedOperations';
+import { SaviInfrastructureError } from '@/lib/savi/textToImageInfrastructure';
 
 export const runtime = 'nodejs';
 
-const MAX_SCRIPT_LENGTH = 12000;
-const DEFAULT_TTS_MODEL = 'gemini-3.1-flash-tts-preview';
+const MAX_SCRIPT_LENGTH = 12_000;
+const MAX_STYLE_LENGTH = 800;
 const DEFAULT_VOICE = 'Puck';
-const RADIO_AUDIO_COST = 120;
-const runFile = promisify(execFile);
+const ALLOWED_VOICES = new Set(['Kore', 'Aoede', 'Callirrhoe', 'Despina', 'Puck', 'Charon', 'Zephyr', 'Fenrir']);
 
-type RadioRequest = {
+type VoiceRequest = {
   script?: string;
   voice?: string;
   style?: string;
+  toolId?: 'text_to_speech' | 'radio_talk';
+  clientRequestId?: string;
 };
 
-function createWavBuffer(pcm: Buffer, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
+class VoiceInputError extends Error {
+  constructor(message: string, readonly status = 400) {
+    super(message);
+    this.name = 'VoiceInputError';
+  }
+}
+
+function isVoiceTool(toolId: string | undefined) {
+  return Boolean(toolId && SAVI_VOICE_TOOL_IDS.includes(toolId as (typeof SAVI_VOICE_TOOL_IDS)[number]));
+}
+
+function createWavBuffer(pcm: Buffer, sampleRate = 24_000, channels = 1, bitsPerSample = 16) {
   const byteRate = (sampleRate * channels * bitsPerSample) / 8;
   const blockAlign = (channels * bitsPerSample) / 8;
   const header = Buffer.alloc(44);
-
   header.write('RIFF', 0);
   header.writeUInt32LE(36 + pcm.length, 4);
   header.write('WAVE', 8);
@@ -38,14 +52,12 @@ function createWavBuffer(pcm: Buffer, sampleRate = 24000, channels = 1, bitsPerS
   header.writeUInt16LE(bitsPerSample, 34);
   header.write('data', 36);
   header.writeUInt32LE(pcm.length, 40);
-
   return Buffer.concat([header, pcm]);
 }
 
 function extractAudioBase64(value: unknown): { data: string; mimeType: string; sampleRate?: number } | null {
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
-
   if (record.type === 'audio' && typeof record.data === 'string') {
     return {
       data: record.data,
@@ -53,163 +65,168 @@ function extractAudioBase64(value: unknown): { data: string; mimeType: string; s
       sampleRate: typeof record.sample_rate === 'number' ? record.sample_rate : undefined
     };
   }
-
   const direct =
     (record.output_audio as { data?: unknown } | undefined)?.data ??
     (record.outputAudio as { data?: unknown } | undefined)?.data;
-
   if (typeof direct === 'string') return { data: direct, mimeType: 'audio/l16' };
-
-  for (const [key, child] of Object.entries(record)) {
-    if (key.toLowerCase().includes('audio') && child && typeof child === 'object') {
-      const data = (child as { data?: unknown }).data;
-      const mimeType = (child as { mime_type?: unknown; mimeType?: unknown }).mime_type ?? (child as { mimeType?: unknown }).mimeType;
-      const sampleRate = (child as { sample_rate?: unknown; sampleRate?: unknown }).sample_rate ?? (child as { sampleRate?: unknown }).sampleRate;
-      if (typeof data === 'string') {
-        return {
-          data,
-          mimeType: typeof mimeType === 'string' ? mimeType : 'audio/l16',
-          sampleRate: typeof sampleRate === 'number' ? sampleRate : undefined
-        };
-      }
-    }
-  }
-
   for (const child of Object.values(record)) {
     if (Array.isArray(child)) {
       for (const item of child) {
-        const found = extractAudioBase64(item);
-        if (found) return found;
+        const result = extractAudioBase64(item);
+        if (result) return result;
       }
     } else if (child && typeof child === 'object') {
-      const found = extractAudioBase64(child);
-      if (found) return found;
+      const result = extractAudioBase64(child);
+      if (result) return result;
     }
   }
-
   return null;
 }
 
-function createAudioPrompt(script: string, style: string) {
-  return `# AUDIO PROFILE
-Radio AI is a warm, confident podcast host for SAVI by SKH.GLOBAL.
-
-# SCENE
-The host is recording a polished radio podcast in a calm premium studio. The delivery should feel clear, professional, useful, and easy to listen to.
-
-# DIRECTOR NOTES
-Style: ${style}
-Pace: natural radio pacing, with short pauses between sections.
-Tone: helpful, practical, premium, not exaggerated.
-Do not read headings mechanically. Make the script feel like a real radio segment.
-
-# TRANSCRIPT
-${script}`;
+function usageFromProvider(data: Record<string, unknown>) {
+  const usage = (data.usageMetadata ?? data.usage_metadata) as Record<string, unknown> | undefined;
+  if (!usage || typeof usage !== 'object') return undefined;
+  const inputTokens = usage.promptTokenCount ?? usage.inputTokens ?? usage.input_tokens;
+  const outputTokens = usage.candidatesTokenCount ?? usage.outputTokens ?? usage.output_tokens;
+  return {
+    inputTokens: typeof inputTokens === 'number' ? inputTokens : undefined,
+    outputTokens: typeof outputTokens === 'number' ? outputTokens : undefined
+  };
 }
 
-async function createLocalPreviewAudio(script: string) {
-  const folder = path.join(tmpdir(), `savi-radio-${randomUUID()}`);
-  const textPath = path.join(folder, 'script.txt');
-  const aiffPath = path.join(folder, 'podcast.aiff');
-  const wavPath = path.join(folder, 'podcast.wav');
+function wavDurationSeconds(wav: Buffer) {
+  if (wav.length < 44 || wav.toString('ascii', 0, 4) !== 'RIFF' || wav.toString('ascii', 8, 12) !== 'WAVE') return null;
+  const sampleRate = wav.readUInt32LE(24);
+  const blockAlign = wav.readUInt16LE(32);
+  if (!sampleRate || !blockAlign) return null;
+  return Math.max(1, Math.round((wav.length - 44) / (sampleRate * blockAlign)));
+}
 
-  await mkdir(folder, { recursive: true });
+function createAudioPrompt(script: string, style: string, toolId: string) {
+  const toolDirection = toolId === 'radio_talk'
+    ? 'Deliver this as a warm, polished radio or podcast host. Keep the supplied script intact.'
+    : 'Read the supplied text exactly, clearly, and naturally.';
+  return [
+    '# SAVI AUDIO PROFILE',
+    toolDirection,
+    `Style: ${style}`,
+    'Use natural pacing and short pauses where the script calls for them.',
+    'Do not add an introduction, headings, comments, or extra words.',
+    '',
+    '# TRANSCRIPT',
+    script
+  ].join('\n');
+}
 
-  try {
-    await writeFile(textPath, script, 'utf8');
-    await runFile('/usr/bin/say', ['-f', textPath, '-o', aiffPath], { timeout: 90000 });
-    await runFile('/usr/bin/afconvert', ['-f', 'WAVE', '-d', 'LEI16@24000', aiffPath, wavPath], { timeout: 30000 });
-    const wav = await readFile(wavPath);
+function normalizedVoice(value: string | undefined) {
+  const match = Array.from(ALLOWED_VOICES).find((voice) => voice.toLowerCase() === value?.trim().toLowerCase());
+  return match || DEFAULT_VOICE;
+}
 
-    return {
-      audio: `data:audio/wav;base64,${wav.toString('base64')}`,
-      filename: 'savi-radio-podcast-local-preview.wav'
-    };
-  } finally {
-    await rm(folder, { force: true, recursive: true }).catch(() => {});
+async function generateAudio(input: { script: string; voice: string; style: string; toolId: string; model: string }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new SaviInfrastructureError('PROVIDER_SERVER_ERROR', 503, 'Voice generation is not connected. Your credits were not used.');
   }
+  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify({
+      model: input.model,
+      input: createAudioPrompt(input.script, input.style, input.toolId),
+      response_format: { type: 'audio' },
+      generation_config: { speech_config: [{ voice: input.voice }] }
+    })
+  });
+  const providerRequestId =
+    response.headers.get('x-goog-request-id') ||
+    response.headers.get('x-request-id') ||
+    response.headers.get('x-guploader-uploadid') ||
+    undefined;
+  const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    const message = (data.error as { message?: string } | undefined)?.message || 'Gemini TTS could not generate audio.';
+    const error = new Error(message) as Error & { status?: number; providerRequestId?: string };
+    error.status = response.status;
+    error.providerRequestId = providerRequestId;
+    throw error;
+  }
+  const audioData = extractAudioBase64(data);
+  if (!audioData) {
+    const error = new Error('Gemini returned no audio.') as Error & { status?: number; providerRequestId?: string };
+    error.status = 502;
+    error.providerRequestId = providerRequestId;
+    throw error;
+  }
+  const wav = audioData.mimeType.toLowerCase().includes('wav')
+    ? Buffer.from(audioData.data, 'base64')
+    : createWavBuffer(Buffer.from(audioData.data, 'base64'), audioData.sampleRate || 24_000);
+  const actualSeconds = wavDurationSeconds(wav);
+  return {
+    bytes: wav,
+    filename: input.toolId === 'radio_talk' ? 'savi-radio-talk.wav' : 'savi-text-to-speech.wav',
+    mimeType: 'audio/wav',
+    mediaType: 'audio' as const,
+    providerRequestId,
+    usage: {
+      ...usageFromProvider(data),
+      audioTokens: actualSeconds ? actualSeconds * 25 : undefined
+    },
+    metadata: {
+      actualAudioSeconds: actualSeconds ?? null,
+      audioDurationStatus: actualSeconds ? 'measured_wav' : 'unavailable'
+    }
+  };
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  if (!session) {
+    return NextResponse.json({ error: 'Please sign in before using this tool.', category: 'AUTH_REQUIRED' }, { status: 401 });
+  }
+
   try {
-    const body = (await request.json().catch(() => ({}))) as RadioRequest;
-    const script = body.script?.trim() ?? '';
-    const voice = body.voice?.trim() || DEFAULT_VOICE;
-    const style = body.style?.trim() || 'warm professional podcast host';
-
-    if (!script) {
-      return NextResponse.json({ error: 'Podcast script is required.' }, { status: 400 });
+    const body = (await request.json().catch(() => ({}))) as VoiceRequest;
+    const script = body.script?.trim() || '';
+    const toolId = body.toolId || 'radio_talk';
+    if (!isVoiceTool(toolId)) throw new VoiceInputError('This voice tool is not available.');
+    if (!script || script.length > MAX_SCRIPT_LENGTH) {
+      throw new VoiceInputError(`Write a script under ${MAX_SCRIPT_LENGTH.toLocaleString()} characters.`);
     }
-
-    if (script.length > MAX_SCRIPT_LENGTH) {
-      return NextResponse.json({ error: `Podcast script is too long. Limit it to ${MAX_SCRIPT_LENGTH} characters for now.` }, { status: 400 });
-    }
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      try {
-        const localAudio = await createLocalPreviewAudio(script);
-        return NextResponse.json({
-          ...localAudio,
-          creditCost: RADIO_AUDIO_COST,
-          mode: 'local-preview'
-        });
-      } catch {
-        return NextResponse.json(
-          { error: 'Podcast voice is not connected on this device yet. Add a voice provider to create downloadable audio.' },
-          { status: 500 }
-        );
-      }
-    }
-
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey
-      },
-      body: JSON.stringify({
-        model: process.env.GEMINI_TTS_MODEL || DEFAULT_TTS_MODEL,
-        input: createAudioPrompt(script, style),
-        response_format: {
-          type: 'audio'
-        },
-        generation_config: {
-          speech_config: [
-            {
-              voice
-            }
-          ]
-        }
-      })
+    const style = body.style?.trim() || 'warm, clear, professional';
+    if (style.length > MAX_STYLE_LENGTH) throw new VoiceInputError('Voice direction is too long.');
+    const estimatedSeconds = estimateSaviVoiceReservationSeconds(script.length);
+    const model = getConfiguredTtsModel();
+    const result = await runProtectedOperation({
+      user: session,
+      clientRequestId: body.clientRequestId || '',
+      toolId,
+      provider: SAVI_TEXT_TO_IMAGE_PROVIDER,
+      model,
+      operation: 'speech_generation',
+      pricingInput: { textCharacters: script.length },
+      pricingOutput: { audioSeconds: estimatedSeconds },
+      mediaType: 'audio',
+      generate: () => generateAudio({ script, voice: normalizedVoice(body.voice), style, toolId, model })
     });
-
-    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-
-    if (!response.ok) {
-      const message =
-        (data.error as { message?: string } | undefined)?.message ||
-        'Gemini TTS could not generate the podcast audio.';
-      return NextResponse.json({ error: message }, { status: response.status });
+    if (result.state === 'processing') {
+      return NextResponse.json({ status: 'processing', jobId: result.jobId, availableCredits: result.availableCredits }, { status: 202 });
     }
-
-    const audioData = extractAudioBase64(data);
-    if (!audioData) {
-      return NextResponse.json({ error: 'Gemini returned no audio. Try a shorter script or another voice.' }, { status: 502 });
-    }
-
-    const wavBuffer = audioData.mimeType.toLowerCase().includes('wav')
-      ? Buffer.from(audioData.data, 'base64')
-      : createWavBuffer(Buffer.from(audioData.data, 'base64'), audioData.sampleRate || 24000);
     return NextResponse.json({
-      audio: `data:audio/wav;base64,${wavBuffer.toString('base64')}`,
-      filename: 'savi-radio-podcast.wav',
-      creditCost: RADIO_AUDIO_COST
+      audio: `/api/assets/${result.assetId}`,
+      assetId: result.assetId,
+      jobId: result.jobId,
+      filename: result.filename,
+      mode: 'gemini',
+      availableCredits: result.availableCredits
     });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Podcast audio generation failed.' },
-      { status: 500 }
-    );
+    if (error instanceof SaviInfrastructureError) {
+      return NextResponse.json({ error: error.message, category: error.category }, { status: error.status });
+    }
+    if (error instanceof VoiceInputError) {
+      return NextResponse.json({ error: error.message, category: 'INVALID_INPUT' }, { status: error.status });
+    }
+    return NextResponse.json({ error: 'SAVI could not complete this voice request. Please try again.', category: 'INTERNAL_ERROR' }, { status: 500 });
   }
 }
