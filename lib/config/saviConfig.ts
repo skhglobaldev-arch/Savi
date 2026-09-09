@@ -50,6 +50,21 @@ function addFirebaseRequirements(missing: Set<string>) {
   addRequired(missing, 'FIREBASE_DATA_CONNECT_CONNECTOR');
 }
 
+function addStripeRequirements(missing: Set<string>, includeWebhookSecret: boolean) {
+  const secretKey = value('STRIPE_SECRET_KEY');
+  addRequired(missing, 'STRIPE_SECRET_KEY');
+  if (isProduction() && secretKey && !secretKey.startsWith('sk_live_')) {
+    missing.add('STRIPE_SECRET_KEY must be a live key');
+  }
+
+  if (!includeWebhookSecret) return;
+  const webhookSecret = value('STRIPE_WEBHOOK_SECRET');
+  addRequired(missing, 'STRIPE_WEBHOOK_SECRET');
+  if (isProduction() && webhookSecret && !webhookSecret.startsWith('whsec_')) {
+    missing.add('STRIPE_WEBHOOK_SECRET has an invalid format');
+  }
+}
+
 function missingFor(area: SaviConfigurationArea) {
   const missing = new Set<string>();
 
@@ -62,9 +77,11 @@ function missingFor(area: SaviConfigurationArea) {
   }
 
   if (area === 'firebase' || area === 'readiness' || area === 'webhook') addFirebaseRequirements(missing);
-  if (area === 'commerce' || area === 'readiness') addHttpsOrigin(missing);
-  if (area === 'commerce' || area === 'webhook') addRequired(missing, 'STRIPE_SECRET_KEY');
-  if (area === 'webhook') addRequired(missing, 'STRIPE_WEBHOOK_SECRET');
+  if (area === 'commerce' || area === 'readiness') {
+    addHttpsOrigin(missing);
+    addStripeRequirements(missing, area === 'readiness');
+  }
+  if (area === 'webhook') addStripeRequirements(missing, true);
   if (area === 'gemini' || area === 'readiness') addRequired(missing, 'GEMINI_API_KEY');
 
   if (isProduction() && value('SAVI_DEV_CREDIT_GRANT_ENABLED').toLowerCase() === 'true') {
