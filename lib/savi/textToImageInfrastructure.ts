@@ -14,6 +14,18 @@ const CLIENT_REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const UUID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9a-f]{32})$/i;
 const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
+function canonicalUuid(value: string) {
+  const compact = value.replace(/-/g, '').toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(compact)) return value;
+  return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
+}
+
+function welcomeGrantKeys(userId: string) {
+  const canonicalKey = `welcome:${canonicalUuid(userId)}`;
+  const legacyKey = `welcome:${userId}`;
+  return Array.from(new Set([canonicalKey, legacyKey]));
+}
+
 export type SaviFailureCategory =
   | 'PROVIDER_TIMEOUT'
   | 'PROVIDER_RATE_LIMIT'
@@ -258,9 +270,17 @@ async function findWelcomeGrant(grantKey: string) {
   return data.creditGrants?.[0] ?? null;
 }
 
+async function findExistingWelcomeGrant(userId: string) {
+  for (const grantKey of welcomeGrantKeys(userId)) {
+    const grant = await findWelcomeGrant(grantKey);
+    if (grant) return grant;
+  }
+  return null;
+}
+
 async function ensureWelcomeGrant(databaseUser: DatabaseUser) {
-  const grantKey = `welcome:${databaseUser.id}`;
-  if (await findWelcomeGrant(grantKey)) return;
+  const grantKey = welcomeGrantKeys(databaseUser.id)[0];
+  if (await findExistingWelcomeGrant(databaseUser.id)) return;
 
   try {
     await dataConnectMutation('GrantWelcomeCredit', {
@@ -275,7 +295,7 @@ async function ensureWelcomeGrant(databaseUser: DatabaseUser) {
       metadata: metadata({ source: 'free_welcome_grant', credits: SAVI_FREE_WELCOME_CREDITS })
     });
   } catch (error) {
-    if (isDuplicateWrite(error) && (await findWelcomeGrant(grantKey))) return;
+    if (isDuplicateWrite(error) && (await findExistingWelcomeGrant(databaseUser.id))) return;
     throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
   }
 }
@@ -304,8 +324,8 @@ export async function resolveSaviDatabaseUser(user: SaviUser): Promise<DatabaseU
       accountId: randomUUID(),
       grantId: randomUUID(),
       transactionId: randomUUID(),
-      grantKey: `welcome:${databaseUser.id}`,
-      providerEventId: `welcome:${databaseUser.id}`,
+      grantKey: welcomeGrantKeys(databaseUser.id)[0],
+      providerEventId: welcomeGrantKeys(databaseUser.id)[0],
       provider: databaseUser.provider,
       providerSubject: databaseUser.providerSubject,
       email: databaseUser.email,

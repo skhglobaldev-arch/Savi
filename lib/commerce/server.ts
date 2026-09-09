@@ -92,6 +92,12 @@ type CommercePurchase = {
   metadata?: string | null;
 };
 
+type StripeDisputeLink = {
+  purchase: CommercePurchase | null;
+  subscription: CommerceSubscription | null;
+  providerCustomerId: string | null;
+};
+
 type BillingStateResponse = {
   commerceCustomers?: CommerceCustomer[];
   commerceSubscriptions?: CommerceSubscription[];
@@ -129,6 +135,20 @@ function stringId(value: unknown) {
   if (typeof value === 'string') return value;
   const record = asRecord(value);
   return typeof record.id === 'string' ? record.id : null;
+}
+
+function parseMetadata(value: string | null | undefined) {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function isFinalDisputePurchaseStatus(status: string) {
+  return status === 'dispute_won' || status === 'dispute_lost';
 }
 
 function unixNumber(value: unknown) {
@@ -228,6 +248,33 @@ async function findCommerceSubscription(providerSubscriptionId: string) {
     providerSubscriptionId
   });
   return data.commerceSubscriptions?.[0] ?? null;
+}
+
+async function findCommerceSubscriptionForDispute(dispute: Record<string, unknown>, paymentIntentId: string) {
+  try {
+    const stripe = getStripeClient();
+    const chargeId = stringId(dispute.charge);
+    if (!chargeId) return null;
+    const charge = await stripe.charges.retrieve(chargeId);
+    const providerCustomerId = stringId(charge.customer);
+    if (!providerCustomerId) return null;
+    const invoices = await stripe.invoices.list({ customer: providerCustomerId, limit: 100 });
+    for (const candidate of invoices.data) {
+      const invoice = await stripe.invoices.retrieve(candidate.id, { expand: ['payments.data.payment.payment_intent'] });
+      const payments = asRecord(invoice.payments);
+      const paymentRows = Array.isArray(payments.data) ? payments.data : [];
+      const matchingPayment = paymentRows.some((payment) => stringId(asRecord(asRecord(payment).payment).payment_intent) === paymentIntentId);
+      if (!matchingPayment) continue;
+
+      const parent = asRecord(invoice.parent);
+      const subscriptionDetails = asRecord(parent.subscription_details);
+      const providerSubscriptionId = stringId(subscriptionDetails.subscription);
+      return providerSubscriptionId ? findCommerceSubscription(providerSubscriptionId) : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 async function findCommercePurchaseByPaymentIntent(providerPaymentIntentId: string) {
@@ -363,6 +410,7 @@ export async function createSubscriptionCheckout(user: SaviUser, planId: string,
     line_items: [{ price: plan.stripePriceId, quantity: 1 }],
     success_url: `${origin}/billing/return?checkout=subscription&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/credits?checkout=cancelled`,
+    managed_payments: { enabled: false },
     metadata: commonMetadata,
     subscription_data: { metadata: commonMetadata }
   });
@@ -381,6 +429,7 @@ export async function createTopUpCheckout(user: SaviUser, packId: string, origin
     line_items: [{ price: pack.stripePriceId, quantity: 1 }],
     success_url: `${origin}/billing/return?checkout=topup&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/credits?checkout=cancelled`,
+    managed_payments: { enabled: false },
     metadata: commonMetadata
   });
   if (!session.url) throw new CommerceError('CHECKOUT_SESSION_UNAVAILABLE', 502, 'Stripe did not return a checkout URL.');
@@ -553,6 +602,11 @@ export async function syncStripeSubscription(event: Stripe.Event, subscriptionOb
 
   const existing = await findCommerceSubscription(providerSubscriptionId);
   const record = asRecord(subscription);
+  const firstItemRecord = asRecord(subscription.items?.data?.[0]);
+  const currentPeriodStart =
+    unixNumber(firstItemRecord.current_period_start) ?? unixNumber(record.current_period_start);
+  const currentPeriodEnd =
+    unixNumber(firstItemRecord.current_period_end) ?? unixNumber(record.current_period_end);
   const subscriptionMetadata = metadata({
     providerEventId: event.id,
     providerEventType: event.type,
@@ -573,8 +627,8 @@ export async function syncStripeSubscription(event: Stripe.Event, subscriptionOb
     catalogVersion: plan.catalogVersion,
     status: normalizeSubscriptionStatus(subscription.status),
     providerStatus: subscription.status,
-    currentPeriodStart: isoFromUnixSeconds(unixNumber(record.current_period_start)),
-    currentPeriodEnd: isoFromUnixSeconds(unixNumber(record.current_period_end)),
+    currentPeriodStart: isoFromUnixSeconds(currentPeriodStart),
+    currentPeriodEnd: isoFromUnixSeconds(currentPeriodEnd),
     cancelAtPeriodEnd: Boolean(record.cancel_at_period_end),
     canceledAt: isoFromUnixSeconds(unixNumber(record.canceled_at)),
     metadata: subscriptionMetadata
@@ -726,6 +780,109 @@ export async function handleStripeInvoicePaid(event: Stripe.Event) {
   }
 
   return findPaymentEvent(event.id);
+}
+
+async function resolveStripeDisputeLink(dispute: Record<string, unknown>, paymentIntentId: string | null): Promise<StripeDisputeLink> {
+  if (!paymentIntentId) return { purchase: null, subscription: null, providerCustomerId: null };
+
+  const purchase = await findCommercePurchaseByPaymentIntent(paymentIntentId);
+  if (purchase) {
+    const customer = await findCommerceCustomer(purchase.userId).catch(() => null);
+    return {
+      purchase,
+      subscription: null,
+      providerCustomerId: customer?.providerCustomerId ?? null
+    };
+  }
+
+  const subscription = await findCommerceSubscriptionForDispute(dispute, paymentIntentId);
+  return {
+    purchase: null,
+    subscription,
+    providerCustomerId: subscription?.providerCustomerId ?? null
+  };
+}
+
+export async function handleStripeDisputeEvent(event: Stripe.Event) {
+  const existingPaymentEvent = await findPaymentEvent(event.id);
+  if (existingPaymentEvent) return existingPaymentEvent;
+
+  const dispute = asRecord(event.data.object);
+  const disputeId = stringId(dispute.id);
+  const paymentIntentId = stringId(dispute.payment_intent);
+  const disputeStatus = typeof dispute.status === 'string' ? dispute.status : null;
+  const outcome = disputeStatus === 'won' || disputeStatus === 'lost' ? disputeStatus : null;
+  const link = await resolveStripeDisputeLink(dispute, paymentIntentId);
+  const purchase = link.purchase;
+  const subscription = link.subscription;
+  const isClosed = event.type === 'charge.dispute.closed';
+  const existingStatus = purchase?.status ?? null;
+  const terminalOutcome = existingStatus === 'dispute_won' ? 'won' : existingStatus === 'dispute_lost' ? 'lost' : null;
+  const purchaseStatus = purchase
+    ? isFinalDisputePurchaseStatus(existingStatus ?? '')
+      ? existingStatus
+      : isClosed && outcome
+        ? `dispute_${outcome}`
+        : 'disputed'
+    : null;
+  const reviewRequired = outcome !== 'won';
+
+  if (purchase && purchaseStatus) {
+    const currentMetadata = parseMetadata(purchase.metadata);
+    const currentHistory = Array.isArray(currentMetadata.disputeEventHistory)
+      ? currentMetadata.disputeEventHistory.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === 'object'))
+      : [];
+    const historyEntry = {
+      eventId: event.id,
+      eventType: event.type,
+      disputeId,
+      paymentIntentId,
+      status: disputeStatus,
+      outcome
+    };
+    const terminalHistoryEntry = terminalOutcome
+      ? [...currentHistory].reverse().find((entry) => entry.eventType === 'charge.dispute.closed' && entry.outcome === terminalOutcome)
+      : null;
+    const nextMetadata = metadata({
+      ...currentMetadata,
+      disputeId,
+      disputePaymentIntentId: paymentIntentId,
+      disputeStatus: terminalOutcome ?? disputeStatus,
+      disputeOutcome: terminalOutcome ?? outcome,
+      disputeReviewRequired: terminalOutcome ? terminalOutcome === 'lost' : reviewRequired,
+      disputeEventType: terminalHistoryEntry?.eventType ?? (terminalOutcome ? currentMetadata.disputeEventType : event.type),
+      disputeEventId: terminalHistoryEntry?.eventId ?? (terminalOutcome ? currentMetadata.disputeEventId : event.id),
+      disputeEventHistory: [...currentHistory.filter((entry) => entry.eventId !== event.id), historyEntry]
+    });
+
+    if (purchaseStatus !== existingStatus || nextMetadata !== purchase.metadata) {
+      await dataConnectMutation('UpdateCommercePurchaseStatus', {
+        purchaseId: purchase.id,
+        userId: purchase.userId,
+        status: purchaseStatus,
+        metadata: nextMetadata
+      });
+    }
+  }
+
+  return recordPaymentEvent({
+    event,
+    objectId: disputeId,
+    userId: purchase?.userId ?? subscription?.userId ?? null,
+    status: 'processed',
+    metadata: {
+      reason: 'recorded_dispute',
+      disputeId,
+      paymentIntentId,
+      disputeStatus,
+      disputeOutcome: outcome,
+      disputeReviewRequired: reviewRequired,
+      purchaseId: purchase?.id ?? null,
+      subscriptionId: subscription?.id ?? null,
+      providerSubscriptionId: subscription?.providerSubscriptionId ?? null,
+      providerCustomerId: link.providerCustomerId
+    }
+  });
 }
 
 export async function recordStripeEventOnly(event: Stripe.Event, status: 'processed' | 'ignored' | 'failed', reason: string) {

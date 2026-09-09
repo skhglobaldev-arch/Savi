@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CommerceCatalogError } from '@/lib/commerce/catalog';
 import {
   handleStripeCheckoutCompleted,
+  handleStripeDisputeEvent,
   handleStripeInvoicePaid,
   recordStripeEventOnly,
   syncStripeSubscription
@@ -26,8 +27,10 @@ export async function POST(request: NextRequest) {
   try {
     if (event.type === 'checkout.session.completed') {
       await handleStripeCheckoutCompleted(event);
-    } else if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded') {
+    } else if (event.type === 'invoice.payment_succeeded') {
       await handleStripeInvoicePaid(event);
+    } else if (event.type === 'invoice.paid') {
+      await recordStripeEventOnly(event, 'processed', 'recorded_invoice_paid_no_credit_change');
     } else if (
       event.type === 'customer.subscription.created' ||
       event.type === 'customer.subscription.updated' ||
@@ -35,14 +38,18 @@ export async function POST(request: NextRequest) {
     ) {
       await syncStripeSubscription(event);
     } else if (
+      event.type === 'charge.dispute.created' ||
+      event.type === 'charge.dispute.updated' ||
+      event.type === 'charge.dispute.closed'
+    ) {
+      await handleStripeDisputeEvent(event);
+    } else if (
       event.type === 'invoice.payment_failed' ||
       event.type === 'charge.refunded' ||
-      event.type === 'refund.created' ||
-      event.type === 'charge.dispute.created'
+      event.type === 'refund.created'
     ) {
       const isRefund = event.type === 'charge.refunded' || event.type === 'refund.created';
-      const isDispute = event.type === 'charge.dispute.created';
-      await recordStripeEventOnly(event, 'processed', isRefund ? 'recorded_refund' : isDispute ? 'recorded_dispute' : 'recorded_no_credit_change');
+      await recordStripeEventOnly(event, 'processed', isRefund ? 'recorded_refund' : 'recorded_no_credit_change');
     } else {
       await recordStripeEventOnly(event, 'ignored', 'unsupported_event_type');
     }

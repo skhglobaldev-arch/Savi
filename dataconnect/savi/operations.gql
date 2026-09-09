@@ -202,6 +202,42 @@ mutation GrantWelcomeCredit(
   })
 }
 
+mutation ReconcileDuplicateWelcomeGrant(
+  $transactionId: UUID!
+  $eventKey: String!
+  $userId: UUID!
+  $expectedAvailableCredits: Int!
+  $expectedSubscriptionCredits: Int!
+  $expectedReservedCredits: Int!
+  $expectedReservedSubscriptionCredits: Int!
+  $ledgerAmount: Int!
+  $creditsToRemove: Int!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  creditAccount_updateMany(
+    where: {
+      userId: { eq: $userId }
+      availableCredits: { eq: $expectedAvailableCredits, ge: $creditsToRemove }
+      subscriptionCredits: { eq: $expectedSubscriptionCredits }
+      reservedCredits: { eq: $expectedReservedCredits }
+      reservedSubscriptionCredits: { eq: $expectedReservedSubscriptionCredits }
+    }
+    data: {
+      availableCredits_update: { dec: $creditsToRemove }
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_STATE_CHANGED")
+  creditTransaction_insert(data: {
+    id: $transactionId
+    eventKey: $eventKey
+    userId: $userId
+    type: "credit_adjustment"
+    amount: $ledgerAmount
+    reason: "welcome_duplicate_reconciliation"
+    metadata: $metadata
+  })
+}
+
 mutation TouchSaviUser(
   $userId: UUID!
   $email: String!
