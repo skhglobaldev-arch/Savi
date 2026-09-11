@@ -5,7 +5,6 @@ import { AskSaviChat } from '@/components/AskSaviChat';
 import { AllMediaLibrary } from '@/components/AllMediaLibrary';
 import { CreditBadge } from '@/components/CreditBadge';
 import { SaviSidebar, type SidebarMode } from '@/components/SaviSidebar';
-import { SaviAccountButton } from '@/components/SaviAccountButton';
 import { FileToolsStudio } from '@/components/file-tools/FileToolsStudio';
 import { ImageToolsStudio } from '@/components/image-tools/ImageToolsStudio';
 import { VideoToolsStudio } from '@/components/video-tools/VideoToolsStudio';
@@ -36,7 +35,7 @@ function getTabLabel(mode: ToolMode) {
 }
 
 function getWorkspaceLabel(mode: SidebarMode) {
-  if (mode === 'All Media') return 'All Media';
+  if (mode === 'All Media') return 'Library';
   return getTabLabel(mode as ToolMode);
 }
 
@@ -166,7 +165,7 @@ export default function WorkspacePage() {
     return (
       <main className="savi-app-home h-screen overflow-hidden bg-black text-white">
         <SaviSidebar active={mode} onOpenMode={handleSidebarMode} credits={credits} />
-        <section className="savi-content-shell flex h-screen min-h-0 flex-col overflow-hidden px-3 pb-3 pt-[74px] sm:px-4 lg:px-5 lg:py-4">
+        <section className="savi-content-shell savi-mobile-tool-offset flex h-screen min-h-0 flex-col overflow-hidden px-3 pb-3 sm:px-4 lg:px-5 lg:py-4">
           <div className="mx-auto flex h-full min-h-0 w-full max-w-[1500px] flex-col gap-3">
             <header className="shrink-0 rounded-[22px] border border-white/10 bg-[#111]/88 px-3 py-3 shadow-[0_18px_45px_rgba(0,0,0,0.32)] backdrop-blur-2xl md:px-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -174,7 +173,7 @@ export default function WorkspacePage() {
                   <button
                     type="button"
                     onClick={returnToToolList}
-                    className="rounded-full border border-white/12 bg-white/8 px-4 py-2 text-xs font-bold text-white/72 transition hover:bg-white/14 hover:text-white"
+                    className="inline-flex min-h-[44px] items-center rounded-lg border border-white/12 bg-white/8 px-4 py-2 text-xs font-bold text-white/72 transition hover:bg-white/14 hover:text-white"
                   >
                     {mode === 'All Media' ? 'Back' : 'Tools'}
                   </button>
@@ -185,7 +184,6 @@ export default function WorkspacePage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <SaviAccountButton credits={credits} />
                   <CreditBadge credits={credits} />
                 </div>
               </div>
@@ -204,8 +202,7 @@ export default function WorkspacePage() {
     <main className="savi-app-home h-screen overflow-hidden bg-black text-white">
       <SaviSidebar active={mode} onOpenMode={handleSidebarMode} credits={credits} />
 
-      <section className="savi-content-shell relative h-screen overflow-hidden pt-[62px] lg:pt-0">
-        <SaviAccountButton credits={credits} className="absolute right-4 top-[74px] z-30 lg:right-6 lg:top-5" />
+      <section className="savi-content-shell savi-mobile-content-offset relative h-screen overflow-hidden lg:pt-0">
         <AskSaviChat
           credits={credits}
           onCreditsChange={handleCreditChange}

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { OutputGallery, type OutputGalleryItem } from '@/components/OutputGallery';
 import { ToolSelect } from '@/components/ToolSelect';
 import { ToolPreview } from '@/components/ToolPreview';
+import { ToolActionBar, ToolCategoryTabs, ToolFieldLabel, ToolHeader, ToolResultEmpty, ToolStatus } from '@/components/SaviToolUI';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
@@ -103,6 +104,16 @@ const videoTools: Array<{
   }
 ];
 
+const videoToolCategories: Record<VideoToolId, 'Create' | 'Animate' | 'Promote'> = {
+  text_video: 'Create',
+  story_video: 'Create',
+  image_video: 'Animate',
+  first_last: 'Animate',
+  extend: 'Animate',
+  product_ad: 'Promote',
+  social_reel: 'Promote'
+};
+
 const modelOptions: Array<{ id: ModelId; label: string; note: string }> = [
   { id: 'omni', label: 'SAVI Video', note: 'Current server-rendered video output' }
 ];
@@ -131,6 +142,42 @@ function getReferenceLabel(toolId: VideoToolId, index: number) {
   if (toolId === 'extend' && index === 0) return 'Video to extend';
 
   return `Reference ${index + 1}`;
+}
+
+function getVideoReferenceLabel(toolId: VideoToolId) {
+  if (toolId === 'first_last') return 'Add the start and end frames';
+  if (toolId === 'extend') return 'Upload the video to extend';
+  return 'Upload your reference media';
+}
+
+function getVideoReferenceHint(toolId: VideoToolId) {
+  if (toolId === 'first_last') return 'Choose the start image first, then the end image. A third reference is optional.';
+  if (toolId === 'extend') return 'Add the existing clip first; an image can guide the next shot if needed.';
+  return 'Add up to three images or videos to guide the result.';
+}
+
+function getVideoReferenceBadge(toolId: VideoToolId): 'Required' | 'Optional' {
+  return ['image_video', 'first_last', 'extend'].includes(toolId) ? 'Required' : 'Optional';
+}
+
+function getVideoPromptLabel(toolId: VideoToolId) {
+  if (toolId === 'text_video') return 'Describe the video';
+  if (toolId === 'image_video') return 'Describe the motion';
+  if (toolId === 'first_last') return 'Describe the transition';
+  if (toolId === 'product_ad') return 'Describe the ad';
+  if (toolId === 'social_reel') return 'Describe the reel';
+  if (toolId === 'extend') return 'Describe what happens next';
+  return 'Describe the next shot';
+}
+
+function getVideoActionLabel(toolId: VideoToolId) {
+  if (toolId === 'text_video') return 'Create video';
+  if (toolId === 'image_video') return 'Animate video';
+  if (toolId === 'first_last') return 'Create transition';
+  if (toolId === 'product_ad') return 'Create product ad';
+  if (toolId === 'social_reel') return 'Create social reel';
+  if (toolId === 'extend') return 'Extend video';
+  return 'Generate video';
 }
 
 function makeDownload(filename: string, content: string) {
@@ -203,6 +250,7 @@ export function VideoToolsStudio({
 }) {
   const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
   const [toolId, setToolId] = useState<VideoToolId>('text_video');
+  const [toolCategory, setToolCategory] = useState<'Create' | 'Animate' | 'Promote'>('Create');
   const [isToolOpen, setIsToolOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState<ModelId>('omni');
@@ -227,6 +275,7 @@ export function VideoToolsStudio({
   const workAreaRef = useRef<HTMLDivElement | null>(null);
 
   const selectedTool = videoTools.find((tool) => tool.id === toolId) ?? videoTools[0];
+  const visibleVideoTools = videoTools.filter((tool) => videoToolCategories[tool.id] === toolCategory);
   const selectedModel = modelOptions.find((item) => item.id === model) ?? modelOptions[0];
   const quoteLabel = serverQuote === null
     ? user ? 'Price unavailable' : 'Sign in to view price'
@@ -294,6 +343,7 @@ export function VideoToolsStudio({
     references.forEach((item) => URL.revokeObjectURL(item.url));
     setReferences([]);
     setToolId(nextTool);
+    setToolCategory(videoToolCategories[nextTool]);
     setIsToolOpen(true);
     setPrompt(nextPrompt);
     setOutputBrief('');
@@ -782,25 +832,34 @@ export function VideoToolsStudio({
   }
 
   return (
-    <section className="glass rounded-[36px] p-5 md:p-7">
-      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div>
-          <p className="text-xs font-black uppercase tracking-[0.22em] text-violet-500">{isToolOpen ? 'Video tool' : 'Video tools'}</p>
-          <h2 className="mt-2 text-3xl font-black md:text-4xl">{isToolOpen ? selectedTool.title : 'Video tools'}</h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-            {isToolOpen ? selectedTool.description : 'Create text-to-video, image-to-video, social reels, product ads, and frame-guided clips.'}
-          </p>
-        </div>
-      </div>
+    <section className="savi-tool-shell">
+      <ToolHeader
+        mark="V"
+        eyebrow={isToolOpen ? 'Video tool' : 'Video tools'}
+        title={isToolOpen ? selectedTool.title : 'Video tools'}
+        description={isToolOpen ? selectedTool.description : 'Create text-to-video, image-to-video, social reels, product ads, and frame-guided clips.'}
+      >
+        {!isToolOpen && (
+          <ToolCategoryTabs
+            value={toolCategory}
+            onChange={(value) => setToolCategory(value as 'Create' | 'Animate' | 'Promote')}
+            options={(['Create', 'Animate', 'Promote'] as const).map((category) => ({
+              id: category,
+              label: category,
+              count: videoTools.filter((tool) => videoToolCategories[tool.id] === category).length
+            }))}
+          />
+        )}
+      </ToolHeader>
 
       {!isToolOpen && (
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {videoTools.map((tool) => (
+      <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-4 md:p-6">
+        {visibleVideoTools.map((tool) => (
           <button
             key={tool.id}
             type="button"
             onClick={() => selectVideoTool(tool.id)}
-            className={`rounded-[22px] border p-3 text-left transition sm:p-4 ${toolId === tool.id ? 'border-violet-300 bg-violet-100 text-violet-950 shadow-[0_18px_40px_rgba(124,58,237,0.16)]' : 'border-violet-100 bg-white/65 text-slate-600 hover:bg-white'}`}
+            className={`min-h-[44px] rounded-lg border p-3 text-left text-white transition sm:p-4 ${toolId === tool.id ? 'border-white/25 bg-white/[0.1]' : 'border-white/10 bg-white/[0.035] hover:border-white/20 hover:bg-white/[0.07]'}`}
           >
             <span className="block font-black">{tool.title}</span>
             <span className="mt-2 block text-xs leading-5 opacity-75">{tool.description}</span>
@@ -812,14 +871,20 @@ export function VideoToolsStudio({
 
       {isToolOpen && (
       <>
-      <div ref={workAreaRef} className="mt-5 scroll-mt-24">
+      <div ref={workAreaRef} className="scroll-mt-[110px] p-5 md:p-6 lg:scroll-mt-24">
       {selectedTool.id === 'story_video' ? renderStoryVideoTool() : (
       <div className="grid gap-5">
         <div className="space-y-4">
-          <div className="rounded-[30px] border border-violet-100 bg-white/70 p-4">
+          <div className="savi-tool-section">
             {selectedTool.imageSlots > 0 && (
+              <>
+              <ToolFieldLabel
+                label={getVideoReferenceLabel(selectedTool.id)}
+                hint={getVideoReferenceHint(selectedTool.id)}
+                badge={getVideoReferenceBadge(selectedTool.id)}
+              />
               <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-violet-100 pb-3">
-                <label className="grid h-11 w-11 cursor-pointer place-items-center rounded-2xl border border-violet-100 bg-white/80 text-2xl font-light text-violet-700 shadow-[0_10px_24px_rgba(124,58,237,0.1)] transition hover:border-violet-300 hover:bg-violet-50" aria-label="Attach references">
+                <label className="grid h-[44px] w-[44px] cursor-pointer place-items-center rounded-lg border border-white/10 bg-white/[0.06] text-2xl font-light text-white shadow-sm transition hover:border-white/20 hover:bg-white/[0.1]" aria-label={getVideoReferenceLabel(selectedTool.id)}>
                   <input
                     type="file"
                     accept="image/*,video/*"
@@ -830,7 +895,7 @@ export function VideoToolsStudio({
                       event.currentTarget.value = '';
                     }}
                   />
-                  +
+                  <span aria-hidden="true" className="relative block h-4 w-4 before:absolute before:left-1/2 before:top-0 before:h-4 before:w-px before:-translate-x-1/2 before:bg-current after:absolute after:left-0 after:top-1/2 after:h-px after:w-4 after:-translate-y-1/2 after:bg-current" />
                 </label>
                 {references.length ? references.map((item, index) => (
                   <div key={item.url} className="group flex max-w-[210px] items-center gap-2 rounded-2xl border border-violet-100 bg-white/80 p-1.5">
@@ -846,41 +911,47 @@ export function VideoToolsStudio({
                     <button
                       type="button"
                       onClick={() => removeReference(index)}
-                      className="grid h-7 w-7 place-items-center rounded-full text-xs font-black text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      className="grid h-[44px] w-[44px] place-items-center rounded-lg text-xs font-black text-slate-400 hover:bg-red-50 hover:text-red-600"
                       aria-label={`Remove ${item.name}`}
                     >
-                      x
+                      <span aria-hidden="true" className="relative block h-3.5 w-3.5 before:absolute before:left-1/2 before:top-0 before:h-3.5 before:w-px before:-translate-x-1/2 before:rotate-45 before:bg-current after:absolute after:left-1/2 after:top-0 after:h-3.5 after:w-px after:-translate-x-1/2 after:-rotate-45 after:bg-current" />
                     </button>
                   </div>
                 )) : (
                   <span className="text-xs font-bold text-slate-400">
-                    {selectedTool.id === 'first_last' ? 'Attach start, end, and optional reference' : 'Attach up to 3 references'}
+                    {selectedTool.id === 'first_last' ? 'Add start frame, end frame, then optional reference' : 'Choose up to 3 references'}
                   </span>
                 )}
               </div>
+              </>
             )}
+            <ToolFieldLabel label={getVideoPromptLabel(selectedTool.id)} badge="Required" />
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               rows={6}
               placeholder={selectedTool.promptPlaceholder}
-              className="min-h-[165px] w-full resize-none bg-transparent text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400"
+              aria-label={`${selectedTool.title} prompt`}
+              className="min-h-[165px] w-full resize-none bg-transparent text-base leading-7 text-white outline-none placeholder:text-white/35"
             />
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-violet-100 pt-3">
-              <span className="text-xs font-black text-slate-500">{quoteLabel}</span>
-              <button
-                type="button"
+            <div className="mt-3 border-t border-white/10 pt-3">
+              <ToolActionBar
+                quote={serverQuote}
+                credits={credits}
+                quoteLabel={quoteLabel}
                 disabled={isGenerating}
+                loading={isGenerating ? 'Generating...' : undefined}
+                label={getVideoActionLabel(selectedTool.id)}
                 onClick={generate}
-                className="rounded-full border border-violet-200 bg-white/70 px-5 py-2.5 text-xs font-black text-violet-700 shadow-[0_12px_28px_rgba(124,58,237,0.13)] backdrop-blur transition hover:bg-violet-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isGenerating ? 'Generating...' : 'Generate'}
-              </button>
+              />
             </div>
-            {error && <p className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</p>}
+            {error && <div className="mt-3"><ToolStatus kind="error">{error}</ToolStatus></div>}
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="md:col-span-2 xl:col-span-4">
+              <ToolFieldLabel label="Core settings" hint="Adjust length, shape, quality, and sound direction." badge="Optional" />
+            </div>
             <ToolSelect label="Model" value={model} options={modelOptions.map((item) => item.id)} labels={Object.fromEntries(modelOptions.map((item) => [item.id, item.label])) as Record<ModelId, string>} onChange={setModel} />
             <ToolSelect label="Time" value={duration} options={durations} suffix="s" onChange={setDuration} />
             <ToolSelect label="Ratio" value={ratio} options={ratios} onChange={setRatio} />
@@ -890,6 +961,7 @@ export function VideoToolsStudio({
           <button
             type="button"
             onClick={() => setWithAudio((current) => !current)}
+            aria-pressed={withAudio}
             className={`flex w-full items-center justify-between rounded-[24px] border px-5 py-4 text-left ${withAudio ? 'border-blue-200 bg-blue-50 text-blue-950' : 'border-violet-100 bg-white/65 text-slate-600'}`}
           >
             <span>
@@ -900,6 +972,10 @@ export function VideoToolsStudio({
               <span className={`block h-5 w-5 rounded-full bg-white transition ${withAudio ? 'translate-x-5' : ''}`} />
             </span>
           </button>
+
+          {!isGenerating && !videoOutputs.some((item) => item.toolId === selectedTool.id) && (
+            <ToolResultEmpty>Your video will appear here after you create it.</ToolResultEmpty>
+          )}
 
           {(isGenerating || videoOutputs.some((item) => item.toolId === selectedTool.id)) && (
             <div className="space-y-3">

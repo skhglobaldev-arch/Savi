@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TemplateItem } from '@/lib/templates';
 import type { ToolMode } from '@/components/ToolModeSelector';
 import type { SidebarMode } from '@/components/SaviSidebar';
+import { ToolStatus } from '@/components/SaviToolUI';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { getSaviAgentTool, type SaviAgentPlan, type SaviAgentToolId } from '@/lib/ai/saviAgent';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
@@ -2138,9 +2139,11 @@ export function AskSaviChat({
                         : `w-full max-w-5xl ${assistantAlign} text-white/82`
                   }
                 >
-                  <div dir={direction} className={`${isWelcome ? 'text-4xl font-light tracking-tight text-white/88 md:text-6xl' : 'whitespace-pre-wrap text-[15px] leading-8 md:text-[16px]'}`}>
-                    {isWelcome ? welcomeHeadline : message.content}
-                  </div>
+                  {isWelcome ? (
+                    <h1 dir={direction} className="text-2xl font-light tracking-tight text-white/88 md:text-4xl">{welcomeHeadline}</h1>
+                  ) : (
+                    <div dir={direction} className="whitespace-pre-wrap text-[15px] leading-8 md:text-[16px]">{message.content}</div>
+                  )}
 
                   {message.attachments?.length ? (
                     <div className={`mt-3 flex flex-wrap gap-2 ${isUser ? 'justify-end' : direction === 'rtl' ? 'justify-end' : 'justify-start'}`}>
@@ -2164,9 +2167,9 @@ export function AskSaviChat({
                             key={mode}
                             type="button"
                             onClick={() => onOpenTool(mode)}
-                            className="rounded-full border border-white/10 bg-white/[0.055] px-3 py-1.5 text-[11px] font-semibold text-white/55 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+                            className="min-h-[44px] rounded-lg border border-white/10 bg-white/[0.055] px-3 py-1.5 text-[11px] font-semibold text-white/55 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
                           >
-                            {mode}
+                            {mode === 'All Media' ? 'Library' : mode}
                           </button>
                         ))}
                       </div>
@@ -2174,7 +2177,7 @@ export function AskSaviChat({
                   )}
 
                   {message.status === 'running' && (
-                    <div className="mt-4 inline-flex rounded-full bg-white/8 px-3 py-1.5 text-xs font-semibold text-white/58">
+                    <div className="savi-tool-status savi-tool-status-loading mt-4 inline-flex" role="status" aria-live="polite">
                       SAVI is thinking...
                     </div>
                   )}
@@ -2196,7 +2199,7 @@ export function AskSaviChat({
 
                   {!isUser && !isWelcome && !isError && (
                     <div className={`mt-4 flex items-center gap-1 text-white/42 ${direction === 'rtl' ? 'justify-end' : 'justify-start'}`}>
-                      <button type="button" onClick={() => navigator.clipboard?.writeText(message.content)} className="rounded-full px-2 py-1 text-xs hover:bg-white/8 hover:text-white">Copy</button>
+                      <button type="button" onClick={() => navigator.clipboard?.writeText(message.content)} className="min-h-[44px] rounded-lg px-3 py-1 text-xs hover:bg-white/8 hover:text-white">Copy</button>
                     </div>
                   )}
 
@@ -2216,14 +2219,14 @@ export function AskSaviChat({
                           type="button"
                           disabled={Boolean(runningActionId)}
                           onClick={() => executeAction(message.id, message.pendingAction as PendingAction)}
-                          className="rounded-full bg-white px-4 py-2 text-xs font-bold text-black hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="min-h-[44px] rounded-lg bg-white px-4 py-2 text-xs font-bold text-black hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {message.pendingAction.canRunInChat ? 'Confirm' : 'Open tool'}
                         </button>
                         <button
                           type="button"
                           onClick={() => setMessages((current) => updateMessage(current, message.id, { pendingAction: undefined, content: 'Cancelled. Tell me the next thing you want to do.' }))}
-                          className="rounded-full border border-white/10 bg-white/8 px-4 py-2 text-xs font-semibold text-white/62 hover:bg-white/14"
+                          className="min-h-[44px] rounded-lg border border-white/10 bg-white/8 px-4 py-2 text-xs font-semibold text-white/62 hover:bg-white/14"
                         >
                           Cancel
                         </button>
@@ -2262,7 +2265,7 @@ export function AskSaviChat({
                     if (item.action === 'media') onOpenTool('All Media');
                     else fileInputRef.current?.click();
                   }}
-                  className="rounded-[18px] border border-white/10 bg-white/[0.07] px-3 py-3 text-left hover:bg-white/[0.12]"
+                  className="min-h-[44px] rounded-lg border border-white/10 bg-white/[0.07] px-3 py-3 text-left hover:bg-white/[0.12]"
                 >
                   <span className="block text-sm font-semibold text-white">{item.label}</span>
                   <span className="mt-1 block text-xs text-white/42">{item.hint}</span>
@@ -2277,11 +2280,7 @@ export function AskSaviChat({
               ))}
             </div>
           ) : null}
-          {uploadError && (
-            <div className="mb-2 rounded-full border border-red-300/20 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-100">
-              {uploadError}
-            </div>
-          )}
+          {uploadError && <div className="mb-2"><ToolStatus kind="error">{uploadError}</ToolStatus></div>}
           <div className="savi-home-input px-4 py-3">
             <div className="flex items-end gap-3">
               <input
@@ -2290,6 +2289,7 @@ export function AskSaviChat({
                 multiple
                 accept="image/*,application/pdf,video/*,audio/*"
                 className="hidden"
+                aria-hidden="true"
                 onChange={(event) => {
                   void handleFiles(event.target.files);
                   event.target.value = '';
@@ -2298,8 +2298,8 @@ export function AskSaviChat({
               <button type="button" onClick={() => fileInputRef.current?.click()} onContextMenu={(event) => {
                 event.preventDefault();
                 setShowQuickMenu((current) => !current);
-              }} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-3xl font-light text-white/72 hover:bg-white/8" aria-label="Upload files">
-                +
+              }} className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg text-3xl font-light text-white/72 hover:bg-white/8" aria-label="Upload files">
+                <span aria-hidden="true" className="relative block h-4 w-4 before:absolute before:left-1/2 before:top-0 before:h-4 before:w-px before:-translate-x-1/2 before:bg-current after:absolute after:left-0 after:top-1/2 after:h-px after:w-4 after:-translate-y-1/2 after:bg-current" />
               </button>
               <textarea
                 value={input}
@@ -2312,10 +2312,11 @@ export function AskSaviChat({
                 }}
                 rows={1}
                 placeholder="Ask SAVI"
-                className="max-h-32 min-h-10 flex-1 resize-none bg-transparent py-2 text-[16px] leading-6 text-white outline-none placeholder:text-white/42"
+                aria-label="Ask SAVI"
+                className="max-h-32 min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[16px] leading-6 text-white outline-none placeholder:text-white/42"
               />
-              <button type="button" onClick={submit} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white text-lg font-black text-black hover:bg-white/85" aria-label="Send">
-                &gt;
+              <button type="button" onClick={submit} className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg bg-white text-lg font-black text-black hover:bg-white/85" aria-label="Send">
+                <span aria-hidden="true" className="block h-3 w-3 rotate-45 border-r-2 border-t-2 border-current" />
               </button>
             </div>
             <div className="mt-1 flex justify-end">
@@ -2342,7 +2343,7 @@ function ChatResultView({ result }: { result: ChatResult }) {
       <div className="mt-3 overflow-hidden rounded-[16px] border border-white/10 bg-black/24 p-2">
         {result.url && <img src={result.url} alt="SAVI generated image" className="savi-output-media rounded-[14px]" />}
         {result.url && (
-          <a href={result.url} download={result.filename || 'savi-image.png'} className="mt-2 inline-flex rounded-full bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+            <a href={result.url} download={result.filename || 'savi-image.png'} className="mt-2 inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
             Download image
           </a>
         )}
@@ -2357,12 +2358,12 @@ function ChatResultView({ result }: { result: ChatResult }) {
         {result.text && <pre className="mt-3 max-h-[220px] overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-white/56">{result.text}</pre>}
         <div className="mt-2 flex flex-wrap gap-2">
           {result.url && (
-            <a href={result.url} download={result.filename || 'savi-audio.wav'} className="rounded-full bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+            <a href={result.url} download={result.filename || 'savi-audio.wav'} className="inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
               Download audio
             </a>
           )}
           {result.text && (
-            <button type="button" onClick={() => downloadText('savi-audio-script.txt', result.text || '')} className="rounded-full border border-white/10 bg-white/8 px-3 py-1.5 text-[11px] font-semibold text-white/62">
+            <button type="button" onClick={() => downloadText('savi-audio-script.txt', result.text || '')} className="min-h-[44px] rounded-lg border border-white/10 bg-white/8 px-3 py-1.5 text-[11px] font-semibold text-white/62">
               Download script
             </button>
           )}
@@ -2380,7 +2381,7 @@ function ChatResultView({ result }: { result: ChatResult }) {
             <p className="mt-1 text-xs text-white/42">{result.helper || 'File ready.'}</p>
           </div>
           {result.url && (
-            <a href={result.url} download={result.filename || 'savi-output.pdf'} className="rounded-full bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+            <a href={result.url} download={result.filename || 'savi-output.pdf'} className="inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
               Download PDF
             </a>
           )}
@@ -2393,7 +2394,7 @@ function ChatResultView({ result }: { result: ChatResult }) {
     <div className="mt-3 rounded-[16px] border border-white/10 bg-black/24 p-3">
       {result.url && <video controls src={result.url} className="savi-output-media rounded-[14px]" />}
       {result.url && (
-        <a href={result.url} download={result.filename || 'savi-video.mp4'} className="mt-2 inline-flex rounded-full bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+        <a href={result.url} download={result.filename || 'savi-video.mp4'} className="mt-2 inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
           Download video
         </a>
       )}
@@ -2427,10 +2428,10 @@ function AttachmentPill({
         <button
           type="button"
           onClick={onRemove}
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs text-white/40 transition hover:bg-white/10 hover:text-white"
+          className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg text-xs text-white/40 transition hover:bg-white/10 hover:text-white"
           aria-label={`Remove ${attachment.name}`}
         >
-          x
+          <span aria-hidden="true" className="relative block h-3.5 w-3.5 before:absolute before:left-1/2 before:top-0 before:h-3.5 before:w-px before:-translate-x-1/2 before:rotate-45 before:bg-current after:absolute after:left-1/2 after:top-0 after:h-3.5 after:w-px after:-translate-x-1/2 after:-rotate-45 after:bg-current" />
         </button>
       )}
     </div>

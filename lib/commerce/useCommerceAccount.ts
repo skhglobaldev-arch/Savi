@@ -5,6 +5,13 @@ import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 
 export type CommerceAccountState = {
   availableCredits: number | null;
+  creditBreakdown: {
+    total: number;
+    planCredits: number;
+    nonPlanCredits: number;
+    reservedCredits: number;
+    reservedPlanCredits: number;
+  } | null;
   catalog: {
     version: string;
     plans: Array<{

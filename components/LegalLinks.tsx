@@ -12,7 +12,7 @@ export function LegalLinks({ compact = false, className = '' }: { compact?: bool
   return (
     <nav aria-label="Legal" className={`flex flex-wrap items-center gap-x-3 gap-y-1 ${compact ? 'text-[11px]' : 'text-xs'} ${className}`}>
       {links.map((link) => (
-        <Link key={link.href} href={link.href} className="text-white/42 transition hover:text-white">
+        <Link key={link.href} href={link.href} className="inline-flex min-h-[44px] items-center text-white/42 transition hover:text-white">
           {link.label}
         </Link>
       ))}
@@ -27,4 +27,3 @@ export function LegalConsentNotice({ className = '' }: { className?: string }) {
     </p>
   );
 }
-

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { OutputGallery, type OutputGalleryItem } from '@/components/OutputGallery';
 import { ToolSelect } from '@/components/ToolSelect';
 import { ToolPreview } from '@/components/ToolPreview';
+import { ToolActionBar, ToolCategoryTabs, ToolFieldLabel, ToolHeader, ToolResultEmpty, ToolStatus } from '@/components/SaviToolUI';
 import { SketchCanvas, type SketchCanvasHandle, type SketchCanvasTool } from '@/components/image-tools/SketchCanvas';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
@@ -212,6 +213,23 @@ const imageTools: Array<{
   }
 ];
 
+const imageToolCategories: Record<ImageToolId, 'Create' | 'Edit' | 'Product'> = {
+  text_to_image: 'Create',
+  story_sketch: 'Create',
+  sketch_to_image: 'Create',
+  text_design: 'Create',
+  variations: 'Create',
+  edit_image: 'Edit',
+  remove_background: 'Edit',
+  remove_object: 'Edit',
+  change_style: 'Edit',
+  instagram_post: 'Product',
+  product_prompt: 'Product',
+  product_photo: 'Product',
+  mockup: 'Product',
+  visual_mixer: 'Product'
+};
+
 const aspectRatios = ['1:1', '4:5', '9:16', '16:9'] as const;
 const qualities = ['720', '1080', '4K'] as const;
 const styles = ['Realistic', 'Product', 'Editorial', '3D', 'Minimal', 'Cinematic'] as const;
@@ -362,6 +380,38 @@ const templateToImageTool: Record<string, ImageToolId> = {
 
 const textOnlyImageTools = new Set<ImageToolId>(['instagram_post', 'product_prompt']);
 
+function getImageUploadLabel(toolId: ImageToolId) {
+  if (toolId === 'instagram_post') return 'Upload the image for your post';
+  if (toolId === 'remove_background') return 'Upload the image to edit';
+  if (toolId === 'remove_object') return 'Upload the image with the unwanted object';
+  if (toolId === 'change_style') return 'Upload the image to restyle';
+  if (toolId === 'product_photo') return 'Upload the product image';
+  if (toolId === 'variations') return 'Upload the image to vary';
+  return 'Upload your image';
+}
+
+function getImagePromptLabel(toolId: ImageToolId) {
+  if (toolId === 'instagram_post') return 'Describe the post you want';
+  if (toolId === 'remove_background') return 'Add a background direction';
+  if (toolId === 'remove_object') return 'Tell SAVI what to remove';
+  if (toolId === 'change_style') return 'Describe the change';
+  if (toolId === 'product_photo') return 'Describe the product scene';
+  if (toolId === 'variations') return 'Describe the variation';
+  if (toolId === 'product_prompt') return 'Describe the product image';
+  return 'Describe what you want to create';
+}
+
+function getImageActionLabel(toolId: ImageToolId) {
+  if (toolId === 'instagram_post') return 'Create post copy';
+  if (toolId === 'product_prompt') return 'Create photo prompt';
+  if (toolId === 'remove_background') return 'Change background';
+  if (toolId === 'remove_object') return 'Remove object';
+  if (toolId === 'change_style') return 'Change style';
+  if (toolId === 'product_photo') return 'Create product photo';
+  if (toolId === 'variations') return 'Create variation';
+  return 'Generate image';
+}
+
 function makeDownload(filename: string, content: string) {
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -456,6 +506,7 @@ export function ImageToolsStudio({
 }) {
   const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
   const [toolId, setToolId] = useState<ImageToolId>('text_to_image');
+  const [toolCategory, setToolCategory] = useState<'Create' | 'Edit' | 'Product'>('Create');
   const [isToolOpen, setIsToolOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [aspectRatio, setAspectRatio] = useState<(typeof aspectRatios)[number]>('1:1');
@@ -509,6 +560,7 @@ export function ImageToolsStudio({
   const pendingTextToImageRequestRef = useRef<PendingTextToImageRequest | null>(null);
 
   const selectedTool = imageTools.find((tool) => tool.id === toolId) ?? imageTools[0];
+  const visibleImageTools = imageTools.filter((tool) => imageToolCategories[tool.id] === toolCategory);
   const selectedMockupPreset = mockupPresets.find((item) => item.id === mockupPresetId) ?? mockupPresets[0];
   const updateServerBalance = (response: { availableCredits?: unknown }) => {
     applyAuthoritativeBalance(response.availableCredits, onCreditsChange);
@@ -634,6 +686,7 @@ export function ImageToolsStudio({
   function selectTool(nextTool: ImageToolId, nextPrompt = '') {
     clearImageInput();
     setToolId(nextTool);
+    setToolCategory(imageToolCategories[nextTool]);
     setIsToolOpen(true);
     setPrompt(nextPrompt);
     clearGeneratedImage();
@@ -1442,7 +1495,7 @@ export function ImageToolsStudio({
       <div className="mt-5 space-y-5">
         <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
           <div className="rounded-[30px] border border-violet-100 bg-white/70 p-4">
-            <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-500">Visual style</p>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-500">Visual direction</p>
             <textarea
               value={storyInstructions}
               onChange={(event) => setStoryInstructions(event.target.value)}
@@ -1463,10 +1516,10 @@ export function ImageToolsStudio({
                 <h3 className="mt-1 text-2xl font-black text-slate-950">Build shot by shot</h3>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={addStoryShot} className="rounded-full bg-violet-600 px-5 py-3 text-sm font-black text-white">
+                <button type="button" onClick={addStoryShot} className="inline-flex min-h-[44px] items-center rounded-lg bg-violet-600 px-5 py-3 text-sm font-black text-white">
                   Add shot
                 </button>
-                <button type="button" onClick={resetStorySketch} className="rounded-full border border-violet-100 bg-white px-5 py-3 text-sm font-black text-slate-700">
+                <button type="button" onClick={resetStorySketch} className="inline-flex min-h-[44px] items-center rounded-lg border border-violet-100 bg-white px-5 py-3 text-sm font-black text-slate-700">
                   Reset
                 </button>
               </div>
@@ -1520,6 +1573,7 @@ export function ImageToolsStudio({
                 </div>
 
                 <div className="mt-3 rounded-[20px] border border-violet-100 bg-white/80 p-3">
+                  <p className="mb-2 text-xs font-black uppercase tracking-[0.16em] text-violet-500">Shot direction</p>
                   <textarea
                     value={shot.prompt}
                     onChange={(event) => updateStoryShot(shot.id, { prompt: event.target.value })}
@@ -1533,7 +1587,7 @@ export function ImageToolsStudio({
                       type="button"
                       onClick={() => generateStoryShot(shot.id)}
                       disabled={!canGenerate || hasGeneratedImage}
-                      className="rounded-full bg-violet-600 px-4 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex min-h-[44px] items-center rounded-lg bg-violet-600 px-4 py-2 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {shot.isGenerating ? 'Generating...' : 'Generate'}
                     </button>
@@ -1606,14 +1660,14 @@ export function ImageToolsStudio({
                     key={item.id}
                     type="button"
                     onClick={() => setSketchTool(item.id)}
-                    className={`rounded-full border px-4 py-2 text-xs font-black transition ${sketchTool === item.id ? 'border-violet-300 bg-violet-600 text-white' : 'border-violet-100 bg-white text-slate-600 hover:border-violet-300'}`}
+                    className={`inline-flex min-h-[44px] items-center rounded-lg border px-4 py-2 text-xs font-black transition ${sketchTool === item.id ? 'border-violet-300 bg-violet-600 text-white' : 'border-violet-100 bg-white text-slate-600 hover:border-violet-300'}`}
                   >
                     {item.label}
                   </button>
                 ))}
               </div>
 
-              <label className="inline-flex cursor-pointer items-center justify-center rounded-full bg-slate-950 px-5 py-2 text-xs font-black text-white">
+              <label className="inline-flex min-h-[44px] cursor-pointer items-center justify-center rounded-lg bg-slate-950 px-5 py-2 text-xs font-black text-white">
                 <input
                   type="file"
                   accept="image/*"
@@ -1637,7 +1691,7 @@ export function ImageToolsStudio({
                       type="button"
                       aria-label={`Use ${item}`}
                       onClick={() => setSketchColor(item)}
-                      className={`h-8 w-8 rounded-full border transition ${sketchColor === item ? 'scale-110 border-violet-500 ring-2 ring-violet-200' : 'border-violet-100'}`}
+                      className={`h-[44px] w-[44px] rounded-full border transition ${sketchColor === item ? 'scale-110 border-violet-500 ring-2 ring-violet-200' : 'border-violet-100'}`}
                       style={{ backgroundColor: item }}
                     />
                   ))}
@@ -1651,8 +1705,9 @@ export function ImageToolsStudio({
                     <button
                       key={size}
                       type="button"
+                      aria-label={`Use ${size}px brush`}
                       onClick={() => setSketchBrushSize(size)}
-                      className={`grid h-8 w-10 place-items-center rounded-full border transition ${sketchBrushSize === size ? 'border-violet-300 bg-violet-600' : 'border-violet-100 bg-white'}`}
+                      className={`grid h-[44px] w-[48px] place-items-center rounded-lg border transition ${sketchBrushSize === size ? 'border-violet-300 bg-violet-600' : 'border-violet-100 bg-white'}`}
                     >
                       <span className={`rounded-full ${sketchBrushSize === size ? 'bg-white' : 'bg-slate-600'}`} style={{ width: Math.max(4, size / 2), height: Math.max(4, size / 2) }} />
                     </button>
@@ -1665,7 +1720,7 @@ export function ImageToolsStudio({
                 <input
                   value={sketchText}
                   onChange={(event) => setSketchText(event.target.value)}
-                  className="mt-3 w-full rounded-2xl border border-violet-100 bg-white px-4 py-2 text-sm font-bold text-slate-800 outline-none focus:border-violet-300"
+                  className="mt-3 min-h-[44px] w-full rounded-lg border border-violet-100 bg-white px-4 py-2 text-sm font-bold text-slate-800 outline-none focus:border-violet-300"
                   placeholder="Example: SAVI"
                 />
               </div>
@@ -1675,6 +1730,7 @@ export function ImageToolsStudio({
 
         <div className="space-y-4">
           <div className="rounded-[30px] border border-violet-100 bg-white/70 p-4">
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.16em] text-violet-500">Describe the finished image</p>
             <textarea
               value={sketchPrompt}
               onChange={(event) => setSketchPrompt(event.target.value)}
@@ -1708,7 +1764,7 @@ export function ImageToolsStudio({
                 type="button"
                 disabled={isSketchGenerating}
                 onClick={() => generateSketchImage()}
-                className="rounded-full border border-violet-200 bg-white/70 px-5 py-2.5 text-xs font-black text-violet-700 shadow-[0_12px_28px_rgba(124,58,237,0.13)] backdrop-blur transition hover:bg-violet-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-[44px] items-center rounded-lg border border-violet-200 bg-white/70 px-5 py-2.5 text-xs font-black text-violet-700 shadow-[0_12px_28px_rgba(124,58,237,0.13)] backdrop-blur transition hover:bg-violet-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isSketchGenerating ? 'Refining...' : 'Generate'}
               </button>
@@ -1803,7 +1859,7 @@ export function ImageToolsStudio({
                     className="mt-3 min-h-[72px] w-full resize-none rounded-[16px] border border-violet-100 bg-white/75 px-3 py-2 text-xs leading-5 text-slate-800 outline-none placeholder:text-slate-400 focus:border-violet-300"
                   />
 
-                  <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-violet-100 bg-white/80 px-3 py-2 text-xs font-black text-violet-700 shadow-[0_10px_24px_rgba(124,58,237,0.08)] transition hover:border-violet-300 hover:bg-violet-50">
+                  <label className="mt-3 inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border border-violet-100 bg-white/80 px-3 py-2 text-xs font-black text-violet-700 shadow-[0_10px_24px_rgba(124,58,237,0.08)] transition hover:border-violet-300 hover:bg-violet-50">
                     <input
                       type="file"
                       accept="image/*"
@@ -1814,7 +1870,7 @@ export function ImageToolsStudio({
                         event.currentTarget.value = '';
                       }}
                     />
-                    <span className="text-lg font-light leading-none">+</span>
+                    <span aria-hidden="true" className="relative block h-4 w-4 before:absolute before:left-1/2 before:top-0 before:h-4 before:w-px before:-translate-x-1/2 before:bg-current after:absolute after:left-0 after:top-1/2 after:h-px after:w-4 after:-translate-y-1/2 after:bg-current" />
                     Add
                   </label>
 
@@ -1834,10 +1890,10 @@ export function ImageToolsStudio({
                               event.stopPropagation();
                               removeVisualMixerIngredient(category.id, item.id);
                             }}
-                            className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-white text-xs font-black text-slate-900 opacity-0 shadow-sm transition group-hover:opacity-100"
+                            className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg bg-white text-xs font-black text-slate-900 opacity-0 shadow-sm transition group-hover:opacity-100"
                             aria-label={`Remove ${item.name}`}
                           >
-                            x
+                            <span aria-hidden="true" className="relative block h-3.5 w-3.5 before:absolute before:left-1/2 before:top-0 before:h-3.5 before:w-px before:-translate-x-1/2 before:rotate-45 before:bg-current after:absolute after:left-1/2 after:top-0 after:h-3.5 after:w-px after:-translate-x-1/2 after:-rotate-45 after:bg-current" />
                           </button>
                         </div>
                         {item.active && <span className="absolute right-2 top-2 h-3 w-3 rounded-full bg-violet-500 ring-2 ring-white" />}
@@ -1948,7 +2004,7 @@ export function ImageToolsStudio({
                 {mockupDesignUrl ? (
                   <img src={mockupDesignUrl} alt="" className="h-10 w-10 rounded-xl bg-slate-950 object-contain" />
                 ) : (
-                  <span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-2xl font-light text-violet-700">+</span>
+                  <span aria-hidden="true" className="relative grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-violet-700 before:absolute before:left-1/2 before:top-1/2 before:h-4 before:w-px before:-translate-x-1/2 before:-translate-y-1/2 before:bg-current after:absolute after:left-1/2 after:top-1/2 after:h-px after:w-4 after:-translate-x-1/2 after:-translate-y-1/2 after:bg-current" />
                 )}
                 <span className="min-w-0 flex-1 truncate text-xs font-black text-slate-600">{mockupDesignName || 'Logo or design'}</span>
               </label>
@@ -1966,7 +2022,7 @@ export function ImageToolsStudio({
                 {mockupSurfaceUrl ? (
                   <img src={mockupSurfaceUrl} alt="" className="h-10 w-10 rounded-xl object-cover" />
                 ) : (
-                  <span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-2xl font-light text-violet-700">+</span>
+                  <span aria-hidden="true" className="relative grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-violet-700 before:absolute before:left-1/2 before:top-1/2 before:h-4 before:w-px before:-translate-x-1/2 before:-translate-y-1/2 before:bg-current after:absolute after:left-1/2 after:top-1/2 after:h-px after:w-4 after:-translate-x-1/2 after:-translate-y-1/2 after:bg-current" />
                 )}
                 <span className="min-w-0 flex-1 truncate text-xs font-black text-slate-600">{mockupSurfaceName || 'Optional surface'}</span>
               </label>
@@ -1981,7 +2037,7 @@ export function ImageToolsStudio({
                   setMockupSurfaceName('');
                   setMockupSurfaceFile(null);
                 }}
-                className="mt-3 rounded-full border border-violet-100 bg-white px-4 py-2 text-xs font-black text-slate-600 hover:border-violet-300"
+                className="mt-3 inline-flex min-h-[44px] items-center rounded-lg border border-violet-100 bg-white px-4 py-2 text-xs font-black text-slate-600 hover:border-violet-300"
               >
                 Remove custom surface
               </button>
@@ -2002,7 +2058,7 @@ export function ImageToolsStudio({
                       setMockupPresetId(firstPreset.id);
                     }
                   }}
-                  className={`rounded-full border px-4 py-2 text-xs font-black transition ${mockupCategory === category.id ? 'border-violet-300 bg-violet-600 text-white' : 'border-violet-100 bg-white text-slate-600 hover:border-violet-300'}`}
+                  className={`inline-flex min-h-[44px] items-center rounded-lg border px-4 py-2 text-xs font-black transition ${mockupCategory === category.id ? 'border-violet-300 bg-violet-600 text-white' : 'border-violet-100 bg-white text-slate-600 hover:border-violet-300'}`}
                 >
                   {category.label}
                 </button>
@@ -2016,7 +2072,7 @@ export function ImageToolsStudio({
                   onClick={() => {
                     setMockupPresetId(preset.id);
                   }}
-                  className={`rounded-2xl border px-4 py-3 text-left text-sm font-black transition ${mockupPresetId === preset.id ? 'border-violet-300 bg-violet-100 text-violet-950' : 'border-violet-100 bg-white text-slate-600 hover:border-violet-300'}`}
+                  className={`min-h-[44px] rounded-lg border px-4 py-3 text-left text-sm font-black transition ${mockupPresetId === preset.id ? 'border-violet-300 bg-violet-100 text-violet-950' : 'border-violet-100 bg-white text-slate-600 hover:border-violet-300'}`}
                 >
                   {preset.label}
                 </button>
@@ -2028,6 +2084,7 @@ export function ImageToolsStudio({
 
         <div className="space-y-4">
           <div className="rounded-[30px] border border-violet-100 bg-white/70 p-4">
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.16em] text-violet-500">Describe the mockup</p>
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
@@ -2041,9 +2098,9 @@ export function ImageToolsStudio({
                 type="button"
                 disabled={isGenerating}
                 onClick={generateMockup}
-                className="rounded-full border border-violet-200 bg-white/70 px-5 py-2.5 text-xs font-black text-violet-700 shadow-[0_12px_28px_rgba(124,58,237,0.13)] backdrop-blur transition hover:bg-violet-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex min-h-[44px] items-center rounded-lg border border-violet-200 bg-white/70 px-5 py-2.5 text-xs font-black text-violet-700 shadow-[0_12px_28px_rgba(124,58,237,0.13)] backdrop-blur transition hover:bg-violet-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isGenerating ? 'Generating...' : 'Generate'}
+                {isGenerating ? 'Generating...' : 'Create mockup'}
               </button>
             </div>
             {error && <p className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</p>}
@@ -2075,25 +2132,34 @@ export function ImageToolsStudio({
   }
 
   return (
-    <section className="glass rounded-[36px] p-5 md:p-7">
-      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div>
-          <p className="text-xs font-black uppercase tracking-[0.22em] text-violet-500">{isToolOpen ? 'Image tool' : 'Image tools'}</p>
-          <h2 className="mt-2 text-3xl font-black md:text-4xl">{isToolOpen ? selectedTool.title : 'Image tools'}</h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-            {isToolOpen ? selectedTool.description : 'Generate, edit, remove, restyle, and create product-ready images with clear tool choices.'}
-          </p>
-        </div>
-      </div>
+    <section className="savi-tool-shell">
+      <ToolHeader
+        mark="I"
+        eyebrow={isToolOpen ? 'Image tool' : 'Image tools'}
+        title={isToolOpen ? selectedTool.title : 'Image tools'}
+        description={isToolOpen ? selectedTool.description : 'Generate, edit, remove, restyle, and create product-ready images with clear tool choices.'}
+      >
+        {!isToolOpen && (
+          <ToolCategoryTabs
+            value={toolCategory}
+            onChange={(value) => setToolCategory(value as 'Create' | 'Edit' | 'Product')}
+            options={(['Create', 'Edit', 'Product'] as const).map((category) => ({
+              id: category,
+              label: category,
+              count: imageTools.filter((tool) => imageToolCategories[tool.id] === category).length
+            }))}
+          />
+        )}
+      </ToolHeader>
 
       {!isToolOpen && (
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {imageTools.map((tool) => (
+      <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-4 md:p-6">
+        {visibleImageTools.map((tool) => (
           <button
             key={tool.id}
             type="button"
             onClick={() => selectTool(tool.id)}
-            className={`rounded-[22px] border p-3 text-left transition sm:p-4 ${toolId === tool.id ? 'border-violet-300 bg-violet-100 text-violet-950 shadow-[0_18px_40px_rgba(124,58,237,0.16)]' : 'border-violet-100 bg-white/65 text-slate-600 hover:bg-white'}`}
+            className={`min-h-[44px] rounded-lg border p-3 text-left text-white transition sm:p-4 ${toolId === tool.id ? 'border-white/25 bg-white/[0.1]' : 'border-white/10 bg-white/[0.035] hover:border-white/20 hover:bg-white/[0.07]'}`}
           >
             <span className="block font-black">{tool.title}</span>
             <span className="mt-2 block text-xs leading-5 opacity-75">{tool.description}</span>
@@ -2105,16 +2171,23 @@ export function ImageToolsStudio({
 
       {isToolOpen && (
       <>
-      <div ref={workAreaRef} className="mt-5 scroll-mt-24">
+      <div ref={workAreaRef} className="scroll-mt-[110px] p-5 md:p-6 lg:scroll-mt-24">
       {selectedTool.id === 'story_sketch' ? renderStorySketchTool() : selectedTool.id === 'sketch_to_image' ? renderSketchToImageTool() : selectedTool.id === 'visual_mixer' ? renderVisualMixerTool() : selectedTool.id === 'mockup' ? renderMockupTool() : (
         <div className="grid gap-5">
           <div className="space-y-4">
-            <div className="rounded-[30px] border border-violet-100 bg-white/70 p-4">
+            <div className="savi-tool-section">
+              {selectedTool.needsImage && (
+                <ToolFieldLabel
+                  label={getImageUploadLabel(selectedTool.id)}
+                  hint="Choose an image first, then describe the change below."
+                  badge="Required"
+                />
+              )}
               {(
                 <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-violet-100 pb-3">
-                  <label className="grid h-11 w-11 cursor-pointer place-items-center rounded-2xl border border-violet-100 bg-white/80 text-2xl font-light text-violet-700 shadow-[0_10px_24px_rgba(124,58,237,0.1)] transition hover:border-violet-300 hover:bg-violet-50" aria-label="Attach image">
+                  <label className="grid h-[44px] w-[44px] cursor-pointer place-items-center rounded-lg border border-white/10 bg-white/[0.06] text-2xl font-light text-white shadow-sm transition hover:border-white/20 hover:bg-white/[0.1]" aria-label={selectedTool.needsImage ? getImageUploadLabel(selectedTool.id) : 'Add an optional reference image'}>
                     <input type="file" accept="image/*" className="hidden" onChange={(event) => loadImage(event.target.files?.[0])} />
-                    +
+                    <span aria-hidden="true" className="relative block h-4 w-4 before:absolute before:left-1/2 before:top-0 before:h-4 before:w-px before:-translate-x-1/2 before:bg-current after:absolute after:left-0 after:top-1/2 after:h-px after:w-4 after:-translate-y-1/2 after:bg-current" />
                   </label>
                   {imageUrl ? (
                     <div className="group flex max-w-[240px] items-center gap-2 rounded-2xl border border-violet-100 bg-white/80 p-1.5">
@@ -2123,38 +2196,42 @@ export function ImageToolsStudio({
                       <button
                         type="button"
                         onClick={clearImageInput}
-                        className="grid h-7 w-7 place-items-center rounded-full text-xs font-black text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        className="grid h-[44px] w-[44px] place-items-center rounded-lg text-xs font-black text-slate-400 hover:bg-red-50 hover:text-red-600"
                         aria-label="Remove image"
                       >
-                        x
+                        <span aria-hidden="true" className="relative block h-3.5 w-3.5 before:absolute before:left-1/2 before:top-0 before:h-3.5 before:w-px before:-translate-x-1/2 before:rotate-45 before:bg-current after:absolute after:left-1/2 after:top-0 after:h-3.5 after:w-px after:-translate-x-1/2 after:-rotate-45 after:bg-current" />
                       </button>
                     </div>
                   ) : (
-                    <span className="text-xs font-bold text-slate-400">{selectedTool.needsImage ? 'Attach one image' : 'Optional reference'}</span>
+                    <span className="text-xs font-bold text-slate-400">{selectedTool.needsImage ? 'Upload an image to begin' : 'Optional reference image'}</span>
                   )}
                 </div>
               )}
+              <ToolFieldLabel
+                label={getImagePromptLabel(selectedTool.id)}
+                hint={selectedTool.id === 'remove_background' ? 'Leave this blank to remove the background only.' : undefined}
+                badge={selectedTool.id === 'remove_background' ? 'Optional' : 'Required'}
+              />
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
                 rows={6}
                 placeholder={selectedTool.promptPlaceholder}
-                className="min-h-[165px] w-full resize-none bg-transparent text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400"
+                aria-label={`${selectedTool.title} prompt`}
+                className="min-h-[165px] w-full resize-none bg-transparent text-base leading-7 text-white outline-none placeholder:text-white/35"
               />
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-violet-100 pt-3">
-                <span className="text-xs font-black text-slate-500">
-                  {quoteLabel}
-                </span>
-                <button
-                  type="button"
+              <div className="mt-3 border-t border-white/10 pt-3">
+                <ToolActionBar
+                  quote={serverQuote}
+                  credits={credits}
+                  quoteLabel={quoteLabel}
                   disabled={isGenerating}
+                  loading={isGenerating ? 'Generating...' : undefined}
+                  label={getImageActionLabel(selectedTool.id)}
                   onClick={generate}
-                  className="rounded-full border border-violet-200 bg-white/70 px-5 py-2.5 text-xs font-black text-violet-700 shadow-[0_12px_28px_rgba(124,58,237,0.13)] backdrop-blur transition hover:bg-violet-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isGenerating ? 'Generating...' : 'Generate'}
-                </button>
+                />
               </div>
-              {error && <p className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</p>}
+              {error && <div className="mt-3"><ToolStatus kind="error">{error}</ToolStatus></div>}
             </div>
 
             <div className="grid gap-3 md:grid-cols-3">
@@ -2162,6 +2239,14 @@ export function ImageToolsStudio({
               <ToolSelect label="Quality" value={quality} options={qualities} onChange={setQuality} />
               <ToolSelect label="Style" value={style} options={styles} onChange={setStyle} />
             </div>
+
+            {!imageOutputs.some((item) => item.toolId === selectedTool.id) && !outputBrief && (
+              <ToolResultEmpty>
+                {textOnlyImageTools.has(selectedTool.id)
+                  ? 'Your SAVI text result will appear here after you create it.'
+                  : 'Your generated image will appear here after you create it.'}
+              </ToolResultEmpty>
+            )}
 
             {textOnlyImageTools.has(selectedTool.id) && outputBrief && (
               <div className="rounded-[24px] border border-violet-100 bg-white/75 p-4">

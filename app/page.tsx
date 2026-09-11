@@ -2,7 +2,6 @@
 
 import { AskSaviChat } from '@/components/AskSaviChat';
 import { SaviSidebar, type SidebarMode } from '@/components/SaviSidebar';
-import { SaviAccountButton } from '@/components/SaviAccountButton';
 import { useAuthoritativeCredits } from '@/lib/savi/useAuthoritativeCredits';
 import type { TemplateItem } from '@/lib/templates';
 
@@ -27,8 +26,7 @@ export default function HomePage() {
   return (
     <main className="savi-app-home h-screen overflow-hidden bg-black text-white">
       <SaviSidebar active="Ask AI" onOpenMode={openTool} credits={credits} />
-      <section className="savi-content-shell relative h-screen overflow-hidden pt-[62px] lg:pt-0">
-        <SaviAccountButton credits={credits} className="absolute right-4 top-[74px] z-30 lg:right-6 lg:top-5" />
+      <section className="savi-content-shell savi-mobile-content-offset relative h-screen overflow-hidden lg:pt-0">
         <AskSaviChat credits={credits ?? 0} onCreditsChange={handleCreditChange} onOpenTool={openTool} />
       </section>
     </main>

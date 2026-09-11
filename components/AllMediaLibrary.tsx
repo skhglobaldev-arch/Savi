@@ -66,10 +66,10 @@ export function AllMediaLibrary() {
   const activeSection = grouped.find((section) => section.type === activeType) ?? grouped[0];
 
   return (
-    <section className="glass min-h-[calc(100vh-118px)] rounded-[32px] p-4 md:p-6">
+    <section className="glass min-h-[calc(100vh-118px)] rounded-2xl p-4 md:p-6">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
-          <p className="text-[11px] font-black uppercase tracking-[0.22em] text-violet-400">All Media</p>
+          <p className="text-[11px] font-black uppercase tracking-[0.22em] text-violet-400">Library</p>
           <h1 className="mt-2 text-2xl font-semibold text-white md:text-4xl">Your SAVI library</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-white/52">Find generated images, videos, voice, PDFs, ZIPs, and scripts in one clean place.</p>
         </div>
@@ -78,25 +78,23 @@ export function AllMediaLibrary() {
         </span>
       </div>
 
-      <div className="mt-6 overflow-x-auto pb-1">
-        <div className="inline-flex min-w-full gap-2 rounded-[24px] border border-white/10 bg-white/[0.045] p-1.5">
-          {grouped.map((section) => (
-            <button
-              key={section.type}
-              type="button"
-              onClick={() => setActiveType(section.type)}
-              className={`min-w-[116px] rounded-[18px] px-4 py-2.5 text-left transition ${
-                activeType === section.type ? 'bg-white/14 text-white shadow-[0_12px_30px_rgba(0,0,0,0.18)]' : 'text-white/52 hover:bg-white/8 hover:text-white'
-              }`}
-            >
-              <span className="block text-sm font-semibold">{section.label}</span>
-              <span className="mt-0.5 block text-[11px]">{section.items.length} saved</span>
-            </button>
-          ))}
-        </div>
+      <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {grouped.map((section) => (
+          <button
+            key={section.type}
+            type="button"
+            onClick={() => setActiveType(section.type)}
+            className={`min-h-[44px] rounded-lg border px-3 py-2.5 text-left transition ${
+              activeType === section.type ? 'border-white/15 bg-white/14 text-white shadow-[0_12px_30px_rgba(0,0,0,0.18)]' : 'border-white/10 bg-white/[0.035] text-white/52 hover:bg-white/8 hover:text-white'
+            }`}
+          >
+            <span className="block text-sm font-semibold">{section.label}</span>
+            <span className="mt-0.5 block text-[11px]">{section.items.length} saved</span>
+          </button>
+        ))}
       </div>
 
-      <div className="mt-4 rounded-[26px] border border-white/10 bg-white/[0.045] p-3">
+      <div className="mt-4 border-t border-white/10 pt-4">
         {activeSection.items.length ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {activeSection.items.map((item) => (
@@ -104,7 +102,7 @@ export function AllMediaLibrary() {
                 key={item.id}
                 type="button"
                 onClick={() => setActiveItem(item)}
-                className="group overflow-hidden rounded-[20px] border border-white/10 bg-black/20 text-left transition hover:border-violet-300/45"
+                className="group min-h-[44px] overflow-hidden rounded-lg border border-white/10 bg-black/20 text-left transition hover:border-violet-300/45"
               >
                 <MediaThumb item={item} />
                 <div className="p-3">
@@ -115,7 +113,7 @@ export function AllMediaLibrary() {
             ))}
           </div>
         ) : (
-          <div className="rounded-[20px] border border-dashed border-white/12 bg-black/18 px-4 py-14 text-center text-sm font-medium text-white/36">
+          <div className="rounded-xl border border-dashed border-white/12 bg-black/18 px-4 py-14 text-center text-sm font-medium text-white/36">
             {activeSection.empty}
           </div>
         )}
@@ -124,7 +122,8 @@ export function AllMediaLibrary() {
       {activeItem && (
         <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/78 p-3 backdrop-blur-xl" role="dialog" aria-modal="true">
           <button type="button" className="absolute inset-0 cursor-default" onClick={() => setActiveItem(null)} aria-label="Close media preview" />
-          <div className="relative w-full max-w-6xl overflow-hidden rounded-[28px] border border-white/10 bg-[#080808] shadow-[0_28px_100px_rgba(0,0,0,0.5)]">
+          <div className="relative w-full max-w-6xl overflow-hidden rounded-2xl border border-white/10 bg-[#080808] shadow-[0_28px_100px_rgba(0,0,0,0.5)]" aria-labelledby="media-preview-title">
+            <h2 id="media-preview-title" className="sr-only">Media preview</h2>
             <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-white">{activeItem.title}</p>
@@ -132,23 +131,23 @@ export function AllMediaLibrary() {
               </div>
               <div className="flex items-center gap-2">
                 {activeItem.url && (
-                  <a href={activeItem.url} download={activeItem.filename || 'savi-output'} className="rounded-full bg-white px-4 py-2 text-xs font-bold text-black">
+                  <a href={activeItem.url} download={activeItem.filename || 'savi-output'} className="inline-flex min-h-[44px] items-center rounded-lg bg-white px-4 py-2 text-xs font-bold text-black">
                     Download
                   </a>
                 )}
                 {activeItem.text && (
-                  <button type="button" onClick={() => downloadText(activeItem.filename || 'savi-output.txt', activeItem.text || '')} className="rounded-full bg-white px-4 py-2 text-xs font-bold text-black">
+                  <button type="button" onClick={() => downloadText(activeItem.filename || 'savi-output.txt', activeItem.text || '')} className="min-h-[44px] rounded-lg bg-white px-4 py-2 text-xs font-bold text-black">
                     Download
                   </button>
                 )}
                 <button type="button" onClick={() => {
                   removeMediaItem(activeItem.id);
                   setActiveItem(null);
-                }} className="rounded-full border border-white/10 bg-white/8 px-4 py-2 text-xs font-semibold text-white/58 hover:bg-white/14">
+                }} className="min-h-[44px] rounded-lg border border-white/10 bg-white/8 px-4 py-2 text-xs font-semibold text-white/58 hover:bg-white/14">
                   Remove
                 </button>
-                <button type="button" onClick={() => setActiveItem(null)} className="grid h-9 w-9 place-items-center rounded-full border border-white/12 text-white/72 hover:bg-white/10" aria-label="Close media preview">
-                  x
+                <button type="button" onClick={() => setActiveItem(null)} className="grid h-[44px] w-[44px] place-items-center rounded-lg border border-white/12 text-white/72 hover:bg-white/10" aria-label="Close media preview">
+                  <span aria-hidden="true" className="relative block h-4 w-4 before:absolute before:left-1/2 before:top-1/2 before:h-px before:w-4 before:-translate-x-1/2 before:-translate-y-1/2 before:rotate-45 before:bg-current after:absolute after:left-1/2 after:top-1/2 after:h-px after:w-4 after:-translate-x-1/2 after:-translate-y-1/2 after:-rotate-45 after:bg-current" />
                 </button>
               </div>
             </div>

@@ -16,7 +16,7 @@ export function SaviAccountButton({ credits, className = '' }: { credits: number
         <button
           type="button"
           onClick={() => signIn()}
-          className="inline-flex h-9 items-center gap-2 rounded-full border border-white/16 bg-white/[0.08] px-3.5 text-xs font-semibold text-white shadow-[0_12px_30px_rgba(0,0,0,0.22)] backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-violet-300/60 hover:bg-white/[0.14]"
+          className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-white/16 bg-white/[0.08] px-3.5 text-xs font-semibold text-white shadow-[0_12px_30px_rgba(0,0,0,0.22)] backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-violet-300/60 hover:bg-white/[0.14]"
         >
           <GoogleMark />
           Sign in

@@ -361,6 +361,7 @@ export async function getCommerceAccountState(user: SaviUser) {
   const databaseUser = (await resolveSaviDatabaseUser(user)) as DatabaseUser;
   const data = await dataConnectQuery<BillingStateResponse, { userId: string }>('GetCommerceBillingState', { userId: databaseUser.id });
   const balance = await getAuthoritativeCreditBalance(user);
+  const creditAccount = await getAuthoritativeCreditAccountByUserId(databaseUser.id).catch(() => null);
   const subscriptions = data.commerceSubscriptions ?? [];
   const activeSubscription =
     subscriptions.find((subscription) => ['active', 'trialing', 'past_due'].includes(subscription.status)) ?? subscriptions[0] ?? null;
@@ -370,6 +371,15 @@ export async function getCommerceAccountState(user: SaviUser) {
 
   return {
     availableCredits: balance?.availableCredits ?? null,
+    creditBreakdown: creditAccount
+      ? {
+          total: creditAccount.availableCredits,
+          planCredits: creditAccount.subscriptionCredits,
+          nonPlanCredits: Math.max(0, creditAccount.availableCredits - creditAccount.subscriptionCredits),
+          reservedCredits: creditAccount.reservedCredits,
+          reservedPlanCredits: creditAccount.reservedSubscriptionCredits
+        }
+      : null,
     catalog: customerSafeCommerceCatalog(),
     billingProfile: data.commerceCustomers?.[0]
       ? {

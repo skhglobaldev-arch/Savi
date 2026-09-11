@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { ToolPreview } from '@/components/ToolPreview';
+import { ToolActionBar, ToolCategoryTabs, ToolFieldLabel, ToolHeader, ToolResultEmpty, ToolStatus } from '@/components/SaviToolUI';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
@@ -124,6 +125,34 @@ const templateToFileTool: Record<string, FileToolId> = {
 const aiDocumentTools = new Set<FileToolId>(['contract_summary', 'explain_document', 'translate_summary', 'pdf_podcast']);
 const CLOSE_ACTIVE_TOOL_EVENT = 'savi-close-active-tool';
 
+function getAiUploadTitle(toolId: FileToolId) {
+  if (toolId === 'contract_summary') return 'Choose a contract PDF';
+  if (toolId === 'explain_document') return 'Choose a PDF to explain';
+  if (toolId === 'translate_summary') return 'Choose a PDF to translate';
+  return 'Choose a PDF for a podcast';
+}
+
+function getAiUploadDescription(toolId: FileToolId) {
+  if (toolId === 'contract_summary') return 'SAVI will show a page preview, then pull out risks, deadlines, and next actions.';
+  if (toolId === 'explain_document') return 'SAVI will show a page preview, then explain the document in plain language.';
+  if (toolId === 'translate_summary') return 'SAVI will show a page preview, then translate and summarise the important parts.';
+  return 'SAVI will show a page preview, then turn the key points into a hosted script.';
+}
+
+function getAiPromptLabel(toolId: FileToolId) {
+  if (toolId === 'contract_summary' || toolId === 'explain_document') return 'Tell SAVI what to look for';
+  if (toolId === 'translate_summary') return 'Add translation guidance';
+  if (toolId === 'pdf_podcast') return 'Guide the podcast script';
+  return 'Add an optional instruction';
+}
+
+function getAiActionLabel(toolId: FileToolId) {
+  if (toolId === 'contract_summary') return 'Summarize contract';
+  if (toolId === 'explain_document') return 'Explain document';
+  if (toolId === 'translate_summary') return 'Translate and summarize';
+  return 'Create podcast script';
+}
+
 function makeId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -199,7 +228,7 @@ function UploadDropzone({
       }}
       onDragLeave={() => setIsOver(false)}
       onDrop={onDrop}
-      className={`rounded-[30px] border border-dashed p-6 text-center transition ${
+      className={`rounded-2xl border border-dashed p-4 text-center transition sm:p-6 ${
         isOver ? 'border-cyan-200 bg-cyan-300/10' : 'border-white/15 bg-black/25'
       }`}
     >
@@ -211,16 +240,15 @@ function UploadDropzone({
         className="hidden"
         onChange={(event) => handleFiles(event.target.files)}
       />
-      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl border border-white/15 bg-white/[0.06] text-3xl font-black">
-        +
+      <div aria-hidden="true" className="relative mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-white/15 bg-white/[0.06] before:absolute before:left-1/2 before:top-1/2 before:h-5 before:w-px before:-translate-x-1/2 before:-translate-y-1/2 before:bg-current after:absolute after:left-1/2 after:top-1/2 after:h-px after:w-5 after:-translate-x-1/2 after:-translate-y-1/2 after:bg-current">
       </div>
-      <h3 className="mt-4 text-xl font-black">{title}</h3>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-white/55">{description}</p>
+      <h3 className="mt-3 text-lg font-black sm:mt-4 sm:text-xl">{title}</h3>
+      <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-white/55 sm:mt-2">{description}</p>
       <button
         type="button"
         disabled={busy}
         onClick={() => inputRef.current?.click()}
-        className="mt-5 rounded-full bg-white px-6 py-3 text-sm font-black text-black transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
+        className="mt-4 min-h-[44px] rounded-lg bg-white px-6 py-3 text-sm font-black text-black transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-60 sm:mt-5"
       >
         Choose PDF{multiple ? 's' : ''}
       </button>
@@ -241,6 +269,7 @@ export function FileToolsStudio({
 }) {
   const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
   const [activeTool, setActiveTool] = useState<FileToolId>('merge');
+  const [toolGroup, setToolGroup] = useState<'PDF tools' | 'AI document'>('PDF tools');
   const [isToolOpen, setIsToolOpen] = useState(false);
   const [mergeFiles, setMergeFiles] = useState<PdfFileItem[]>([]);
   const [pageFile, setPageFile] = useState<PdfFileItem | null>(null);
@@ -265,6 +294,7 @@ export function FileToolsStudio({
   const workAreaRef = useRef<HTMLDivElement | null>(null);
 
   const selectedTool = tools.find((tool) => tool.id === activeTool) ?? tools[0];
+  const visibleTools = tools.filter((tool) => tool.group === toolGroup);
   const selectedJpgPages = useMemo(() => jpgPages.filter((page) => page.selected), [jpgPages]);
   const selectedOrganizePages = useMemo(() => pageItems.filter((page) => page.selected), [pageItems]);
   const isBusy = Boolean(busyLabel);
@@ -382,6 +412,7 @@ export function FileToolsStudio({
 
   function selectFileTool(nextTool: FileToolId, nextPrompt = '') {
     setActiveTool(nextTool);
+    setToolGroup(tools.find((tool) => tool.id === nextTool)?.group ?? 'PDF tools');
     setIsToolOpen(true);
     clearFileInputs();
     setAiPrompt(nextPrompt);
@@ -741,8 +772,8 @@ export function FileToolsStudio({
     return (
       <div className="space-y-5">
         <UploadDropzone
-          title="Drop PDFs to merge"
-          description="Add two or more PDF files. Drag the cards below to control the final order."
+          title="Add PDFs to merge"
+          description="Choose two or more PDFs, then reorder them below before merging."
           multiple
           busy={isBusy}
           onFiles={addMergeFiles}
@@ -793,9 +824,9 @@ export function FileToolsStudio({
                   <button
                     type="button"
                     onClick={() => setMergeFiles((current) => current.filter((next) => next.id !== item.id))}
-                    className="h-8 w-8 rounded-full border border-violet-100 bg-white text-slate-400 hover:text-violet-700"
+                    className="grid h-[44px] w-[44px] place-items-center rounded-lg border border-violet-100 bg-white text-slate-400 hover:text-violet-700"
                   >
-                    x
+                    <span aria-hidden="true" className="relative block h-3.5 w-3.5 before:absolute before:left-1/2 before:top-0 before:h-3.5 before:w-px before:-translate-x-1/2 before:rotate-45 before:bg-current after:absolute after:left-1/2 after:top-0 after:h-3.5 after:w-px after:-translate-x-1/2 after:-rotate-45 after:bg-current" />
                   </button>
                 </div>
               ))}
@@ -803,7 +834,7 @@ export function FileToolsStudio({
           </div>
         )}
 
-        <ActionBar
+        <ToolActionBar
           quote={serverQuote}
           credits={credits}
           disabled={isBusy || mergeFiles.filter((item) => item.status === 'ready').length < 2}
@@ -881,7 +912,7 @@ export function FileToolsStudio({
                   {page.pageNumber}
                 </span>
                 <span className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-slate-950 text-xs font-black text-white">
-                  {page.selected ? '✓' : ''}
+                  {page.selected ? <span aria-hidden="true" className="h-2 w-3 -rotate-45 border-b-2 border-l-2 border-white" /> : null}
                 </span>
               </button>
               {mode === 'organize' && (
@@ -919,14 +950,14 @@ export function FileToolsStudio({
     return (
       <div className="space-y-5">
         <UploadDropzone
-          title="Open a PDF"
-          description="Preview every page you want to control. Drag pages to reorder, rotate them, or remove pages before export."
+          title="Choose a PDF to organize"
+          description="Preview pages, then reorder, rotate, remove, or export the pages you need."
           busy={isBusy}
           onFiles={(files) => loadPagePreview(files[0], 'organize')}
         />
         {renderPageGrid('organize')}
         <div className="grid gap-3 md:grid-cols-2">
-          <ActionBar
+          <ToolActionBar
             quote={serverQuote}
             credits={credits}
             disabled={isBusy || !pageFile || pageItems.length < 1}
@@ -934,7 +965,7 @@ export function FileToolsStudio({
             label="Export organized PDF"
             onClick={() => runProcess('organize_pdf')}
           />
-          <ActionBar
+          <ToolActionBar
             quote={splitQuote}
             credits={credits}
             disabled={isBusy || !pageFile || selectedOrganizePages.length < 1}
@@ -951,15 +982,15 @@ export function FileToolsStudio({
     return (
       <div className="space-y-5">
         <UploadDropzone
-          title="Upload PDF for images"
-          description="Choose the exact pages you want SAVI to turn into high-quality JPG files."
+          title="Choose a PDF for JPGs"
+          description="Select the pages to turn into high-quality JPG files."
           busy={isBusy}
           onFiles={(files) => loadPagePreview(files[0], 'jpg')}
         />
 
         {renderPageGrid('jpg')}
 
-        <ActionBar
+        <ToolActionBar
           quote={serverQuote}
           credits={credits}
           disabled={isBusy || !jpgFile || selectedJpgPages.length < 1}
@@ -975,8 +1006,8 @@ export function FileToolsStudio({
     return (
       <div className="space-y-5">
         <UploadDropzone
-          title="Upload PDF to extract images"
-          description="SAVI will preserve the original embedded images and package them in one downloadable ZIP."
+          title="Choose a PDF to extract images"
+          description="SAVI will preserve embedded images and package them in one downloadable ZIP."
           busy={isBusy}
           onFiles={(files) => loadPagePreview(files[0], 'jpg')}
         />
@@ -994,7 +1025,7 @@ export function FileToolsStudio({
           </div>
         )}
 
-        <ActionBar
+          <ToolActionBar
           quote={serverQuote}
           credits={credits}
           disabled={isBusy || !jpgFile || jpgFile.status !== 'ready'}
@@ -1010,8 +1041,8 @@ export function FileToolsStudio({
     return (
       <div className="space-y-5">
         <UploadDropzone
-          title={`Upload PDF for ${selectedTool.title}`}
-          description="Add the document, check the preview, then generate the selected workflow."
+          title={getAiUploadTitle(activeTool)}
+          description={getAiUploadDescription(activeTool)}
           busy={isBusy}
           onFiles={(files) => loadAiPdf(files[0])}
         />
@@ -1052,25 +1083,26 @@ export function FileToolsStudio({
           </div>
         )}
 
-        <div className="rounded-[26px] border border-violet-100 bg-white/70 p-4">
-          <p className="mb-3 text-xs font-black uppercase tracking-[0.16em] text-violet-500">Instruction</p>
+        <div className="savi-tool-section">
+          <ToolFieldLabel label={getAiPromptLabel(activeTool)} hint="This is optional. SAVI uses the document itself when you leave it blank." badge="Optional" />
           <textarea
             value={aiPrompt}
             onChange={(event) => setAiPrompt(event.target.value)}
             rows={4}
-            className="min-h-[120px] w-full resize-none bg-transparent text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400"
+            aria-label={`${selectedTool.title} instruction`}
+            className="min-h-[120px] w-full resize-none bg-transparent text-base leading-7 text-white outline-none placeholder:text-white/35"
             placeholder={selectedTool.promptPlaceholder}
           />
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-violet-100 pt-3">
-            <span className="text-xs font-black text-slate-500">{quoteLabel}</span>
-            <button
-              type="button"
+          <div className="mt-3 border-t border-white/10 pt-3">
+            <ToolActionBar
+              quote={serverQuote}
+              credits={credits}
+              quoteLabel={quoteLabel}
               disabled={isBusy || !aiFile || aiFile.status !== 'ready'}
+              loading={busyLabel || undefined}
+              label={getAiActionLabel(activeTool)}
               onClick={runAiDocumentTool}
-              className="rounded-full border border-violet-200 bg-white/70 px-5 py-2.5 text-xs font-black text-violet-700 shadow-[0_12px_28px_rgba(124,58,237,0.13)] backdrop-blur transition hover:bg-violet-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              {busyLabel || `Generate ${selectedTool.title}`}
-            </button>
+            />
           </div>
         </div>
 
@@ -1092,7 +1124,7 @@ export function FileToolsStudio({
                   anchor.click();
                   URL.revokeObjectURL(url);
                 }}
-                className="rounded-full bg-slate-950 px-5 py-3 text-sm font-black text-white"
+                className="inline-flex min-h-[44px] items-center rounded-lg bg-slate-950 px-5 py-3 text-sm font-black text-white"
               >
                 Download
               </button>
@@ -1114,7 +1146,7 @@ export function FileToolsStudio({
                     type="button"
                     disabled={podcastBusy || Boolean(user && podcastQuote === null)}
                     onClick={createRadioPodcastAudio}
-                    className="rounded-full bg-violet-600 px-6 py-3 text-sm font-black text-white shadow-[0_16px_35px_rgba(124,58,237,0.22)] transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-55"
+                    className="inline-flex min-h-[44px] items-center rounded-lg bg-violet-600 px-6 py-3 text-sm font-black text-white shadow-[0_16px_35px_rgba(124,58,237,0.22)] transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     {podcastBusy ? 'Creating podcast...' : podcastQuote === null ? 'Quote unavailable' : `Create podcast - ${podcastQuote} credits`}
                   </button>
@@ -1144,26 +1176,34 @@ export function FileToolsStudio({
   }
 
   return (
-    <section className="glass overflow-hidden rounded-[36px]">
-      <div className="border-b border-white/10 bg-white/[0.035] p-5 md:p-6">
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-100/70">{isToolOpen ? 'File tool' : 'File tools'}</p>
-            <h2 className="mt-2 text-3xl font-black md:text-4xl">{isToolOpen ? selectedTool.title : 'File tools'}</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-white/58">
-              {isToolOpen ? selectedTool.description : 'Upload, preview, reorder, select, export, and download without leaving SAVI.'}
-            </p>
-          </div>
-        </div>
+    <section className="savi-tool-shell">
+      <ToolHeader
+        mark="F"
+        eyebrow={isToolOpen ? 'File tool' : 'File tools'}
+        title={isToolOpen ? selectedTool.title : 'File tools'}
+        description={isToolOpen ? selectedTool.description : 'Upload, preview, reorder, select, export, and download without leaving SAVI.'}
+      >
+        {!isToolOpen && (
+          <ToolCategoryTabs
+            value={toolGroup}
+            onChange={(value) => setToolGroup(value as 'PDF tools' | 'AI document')}
+            options={(['PDF tools', 'AI document'] as const).map((group) => ({
+              id: group,
+              label: group,
+              count: tools.filter((tool) => tool.group === group).length
+            }))}
+          />
+        )}
+      </ToolHeader>
 
         {!isToolOpen && (
-        <div className="mt-5 grid gap-2 md:grid-cols-3 xl:grid-cols-4">
-          {tools.map((tool) => (
+        <div className="grid gap-2 p-5 md:grid-cols-3 xl:grid-cols-4 md:p-6">
+          {visibleTools.map((tool) => (
             <button
               key={tool.id}
               type="button"
               onClick={() => selectFileTool(tool.id)}
-              className={`rounded-[24px] border p-4 text-left transition ${
+              className={`min-h-[44px] rounded-lg border p-4 text-left transition ${
                 activeTool === tool.id
                   ? 'border-cyan-200/50 bg-cyan-300/12 shadow-[0_0_35px_rgba(0,217,255,0.12)]'
                   : 'border-white/10 bg-black/18 hover:border-white/25'
@@ -1179,21 +1219,15 @@ export function FileToolsStudio({
           ))}
         </div>
         )}
-      </div>
-
       {isToolOpen && (
-      <div ref={workAreaRef} className="scroll-mt-24 p-5 md:p-6">
+      <div ref={workAreaRef} className="scroll-mt-[110px] p-5 md:p-6 lg:scroll-mt-24">
         {activeTool === 'merge' && renderMergeTool()}
         {activeTool === 'organize' && renderOrganizeTool()}
         {activeTool === 'jpg' && renderJpgTool()}
         {activeTool === 'extract_images' && renderExtractImagesTool()}
         {aiDocumentTools.has(activeTool) && renderAiDocumentTool()}
 
-        {error && (
-          <div className="mt-5 rounded-[22px] border border-red-300/20 bg-red-400/10 p-4 text-sm font-bold text-red-100">
-            {error}
-          </div>
-        )}
+        {error && <div className="mt-5"><ToolStatus kind="error">{error}</ToolStatus></div>}
 
         {output && (
           <div className="mt-5 flex flex-col gap-4 rounded-[26px] border border-emerald-200/25 bg-emerald-300/10 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -1204,11 +1238,14 @@ export function FileToolsStudio({
             <a
               href={output.url}
               download={output.filename}
-              className="rounded-full bg-white px-6 py-3 text-center text-sm font-black text-black hover:bg-emerald-100"
+              className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-white px-6 py-3 text-center text-sm font-black text-black hover:bg-emerald-100"
             >
               Download
             </a>
           </div>
+        )}
+        {!output && !aiResult && !isBusy && (
+          <ToolResultEmpty>Your exported file will appear here after you finish this step.</ToolResultEmpty>
         )}
       </div>
       )}
@@ -1221,47 +1258,4 @@ function normaliseClientRotation(rotation: number): PageItem['rotation'] {
   const next = ((rotation % 360) + 360) % 360;
   if (next === 90 || next === 180 || next === 270) return next;
   return 0;
-}
-
-function ActionBar({
-  quote,
-  credits,
-  disabled,
-  loading,
-  label,
-  onClick
-}: {
-  quote: number | null;
-  credits: number | null;
-  disabled?: boolean;
-  loading?: string;
-  label: string;
-  onClick: () => void;
-}) {
-  const quoteLabel = quote === null ? 'Current price unavailable' : `${quote} credits`;
-  return (
-    <div className="rounded-[22px] border border-white/10 bg-white/[0.045] px-4 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-black text-white/50">
-            {quoteLabel}
-            {quote !== null && (
-              <>
-                <span className="text-white/25"> / </span>
-                <span className="text-white/58">{credits === null ? 'Balance unavailable' : `${credits} available`}</span>
-              </>
-            )}
-          </p>
-        </div>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onClick}
-          className="rounded-full border border-white/12 bg-white/10 px-5 py-2.5 text-xs font-black text-white/80 backdrop-blur transition hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          {loading || label}
-        </button>
-      </div>
-    </div>
-  );
 }

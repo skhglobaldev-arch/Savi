@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { ToolPreview } from '@/components/ToolPreview';
+import { ToolActionBar, ToolFieldLabel, ToolHeader, ToolStatus } from '@/components/SaviToolUI';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
@@ -243,23 +244,20 @@ export function VoiceToolsStudio({
     : 'Example: Read this product intro in a warm natural voice: “SAVI turns ideas, files, and tasks into usable outputs.”';
 
   return (
-    <section className="glass rounded-[36px] p-5 md:p-7">
-      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div>
-          <p className="text-xs font-black uppercase tracking-[0.22em] text-violet-500">{isToolOpen ? 'Voice tool' : 'Voice tools'}</p>
-          <h2 className="mt-2 text-3xl font-black md:text-4xl">{isToolOpen ? (mode === 'radio' ? 'Radio Talk AI' : 'Text to Speech') : 'Voice tools'}</h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-            {isToolOpen
-              ? mode === 'radio'
-                ? 'Turn a topic or document script into a hosted radio segment.'
-                : 'Read exact text with the voice and tone you choose.'
-              : 'Text to speech and Radio Talk are separate tools, each with its own voice, tone, and output style.'}
-          </p>
-        </div>
-      </div>
+    <section className="savi-tool-shell">
+      <ToolHeader
+        mark="A"
+        eyebrow={isToolOpen ? 'Voice tool' : 'Voice tools'}
+        title={isToolOpen ? (mode === 'radio' ? 'Radio Talk AI' : 'Text to Speech') : 'Voice tools'}
+        description={isToolOpen
+          ? mode === 'radio'
+            ? 'Turn a topic or document script into a hosted radio segment.'
+            : 'Read exact text with the voice and tone you choose.'
+          : 'Text to speech and Radio Talk are separate tools, each with its own voice, tone, and output style.'}
+      />
 
       {!isToolOpen && (
-      <div className="mt-5 grid gap-2 rounded-[24px] border border-violet-100 bg-white/55 p-2 md:grid-cols-2">
+      <div className="grid gap-2 border-b border-white/10 bg-white/[0.02] p-5 md:grid-cols-2 md:p-6">
         {[
           { id: 'tts' as const, label: 'Text to Speech', note: 'Read exact text with a chosen voice', previewId: 'voice_tts' },
           { id: 'radio' as const, label: 'Radio Talk AI', note: 'Turn a topic into a hosted segment', previewId: 'voice_radio' }
@@ -276,7 +274,7 @@ export function VoiceToolsStudio({
               setAudioName('');
               setError('');
             }}
-            className={`rounded-[20px] px-4 py-3 text-left transition ${mode === item.id ? 'bg-violet-600 text-white shadow-[0_18px_40px_rgba(124,58,237,0.22)]' : 'text-slate-600 hover:bg-white'}`}
+            className={`min-h-[44px] rounded-lg border px-4 py-3 text-left text-white transition ${mode === item.id ? 'border-white/25 bg-white/[0.1]' : 'border-white/10 bg-white/[0.035] hover:border-white/20 hover:bg-white/[0.07]'}`}
           >
             <span className="block font-black">{item.label}</span>
             <span className="mt-1 block text-xs opacity-75">{item.note}</span>
@@ -288,25 +286,32 @@ export function VoiceToolsStudio({
 
       {isToolOpen && (
       <>
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_0.72fr]">
-        <div className="rounded-[30px] border border-violet-100 bg-white/70 p-4">
+      <div className="grid gap-5 p-5 xl:grid-cols-[1fr_0.72fr] md:p-6">
+        <div className="savi-tool-section">
+          <ToolFieldLabel
+            label={mode === 'radio' ? 'Add a topic or script' : 'Paste the text to read'}
+            hint={mode === 'radio' ? 'Give SAVI the subject and key points for a hosted segment.' : 'SAVI will speak these words exactly as written.'}
+            badge="Required"
+          />
           <textarea
             value={text}
             onChange={(event) => setText(event.target.value)}
             rows={7}
             placeholder={placeholder}
-            className="min-h-[180px] w-full resize-none bg-transparent text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400"
+            aria-label={mode === 'radio' ? 'Radio Talk script or topic' : 'Text to Speech text'}
+            className="min-h-[180px] w-full resize-none bg-transparent text-base leading-7 text-white outline-none placeholder:text-white/35"
           />
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-violet-100 pt-4">
-            <span className="text-xs font-bold text-slate-500">{text.length.toLocaleString()} characters · {quoteLabel}</span>
-            <button
-              type="button"
+          <div className="mt-4 border-t border-white/10 pt-4">
+            <p className="mb-3 text-xs font-bold text-white/45">{text.length.toLocaleString()} characters</p>
+            <ToolActionBar
+              quote={serverQuote}
+              credits={credits}
+              quoteLabel={quoteLabel}
               disabled={isGenerating}
+              loading={isGenerating ? 'Generating...' : undefined}
+              label={mode === 'radio' ? 'Create radio segment' : 'Generate audio'}
               onClick={generate}
-              className="rounded-full border border-violet-200 bg-white/70 px-5 py-2.5 text-xs font-black text-violet-700 shadow-[0_12px_28px_rgba(124,58,237,0.13)] backdrop-blur transition hover:bg-violet-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isGenerating ? 'Generating...' : 'Generate'}
-            </button>
+            />
           </div>
         </div>
 
@@ -379,7 +384,7 @@ export function VoiceToolsStudio({
                 key={sample}
                 type="button"
                 onClick={() => speak(sample, tone)}
-                className="rounded-2xl border border-violet-100 bg-white/70 px-4 py-3 text-left text-sm font-bold text-slate-700 hover:border-violet-300"
+                className="min-h-[44px] rounded-lg border border-violet-100 bg-white/70 px-4 py-3 text-left text-sm font-bold text-slate-700 hover:border-violet-300"
               >
                 Play sample
                 <span className="mt-1 block text-xs font-medium text-slate-500">{sample}</span>
@@ -396,18 +401,18 @@ export function VoiceToolsStudio({
             </div>
             {result && (
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => downloadText(mode === 'radio' ? 'savi-radio-script.txt' : 'savi-tts-script.txt', result)} className="rounded-full border border-violet-200 bg-white px-5 py-3 text-sm font-black text-slate-800">
+                <button type="button" onClick={() => downloadText(mode === 'radio' ? 'savi-radio-script.txt' : 'savi-tts-script.txt', result)} className="inline-flex min-h-[44px] items-center rounded-lg border border-violet-200 bg-white px-5 py-3 text-sm font-black text-slate-800">
                   Download script
                 </button>
                 {audioUrl && (
-                  <a href={audioUrl} download={audioName || 'savi-voice.wav'} className="rounded-full bg-slate-950 px-5 py-3 text-sm font-black text-white">
+                    <a href={audioUrl} download={audioName || 'savi-voice.wav'} className="inline-flex min-h-[44px] items-center rounded-lg bg-slate-950 px-5 py-3 text-sm font-black text-white">
                     Download audio
                   </a>
                 )}
               </div>
             )}
           </div>
-          {error && <p className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</p>}
+          {error && <div className="mt-4"><ToolStatus kind="error">{error}</ToolStatus></div>}
           {audioUrl && (
             <div className="mt-4 rounded-[22px] border border-violet-100 bg-violet-50/80 p-4">
               <audio controls src={audioUrl} className="w-full" />
@@ -431,13 +436,15 @@ export function VoiceToolsStudio({
 function ControlGroup({ title, value, children }: { title: string; value: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-[26px] border border-violet-100 bg-white/55 p-4">
-      <button type="button" onClick={() => setOpen((current) => !current)} className="flex w-full items-center justify-between gap-4 text-left">
+    <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)} className="flex min-h-[44px] w-full items-center justify-between gap-4 text-left">
         <span>
           <span className="block text-xs font-black uppercase tracking-[0.16em] text-violet-500">{title}</span>
           <span className="mt-1 block text-sm font-bold text-slate-700">{value}</span>
         </span>
-        <span className={`grid h-9 w-9 place-items-center rounded-full border border-violet-100 bg-white text-slate-700 transition ${open ? 'rotate-90' : ''}`}>›</span>
+        <span aria-hidden="true" className={`grid h-[44px] w-[44px] place-items-center rounded-lg border border-white/10 bg-white/[0.06] text-white transition ${open ? 'rotate-90' : ''}`}>
+          <span className="h-2.5 w-2.5 -rotate-45 border-b border-r border-white/55" />
+        </span>
       </button>
       {open && <div className="mt-4">{children}</div>}
     </div>

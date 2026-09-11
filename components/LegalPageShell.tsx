@@ -19,17 +19,17 @@ export function LegalPageShell({
     <main className="min-h-screen bg-black text-white">
       <header className="border-b border-white/10 bg-[#101012]/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-5 px-5 py-4">
-          <Link href="/" className="flex items-center gap-3" aria-label="SAVI home">
+          <Link href="/" className="flex min-h-[44px] items-center gap-3" aria-label="SAVI home">
             <img src="/brand/savi-logo.png" alt="SAVI" className="h-9 w-9 rounded-xl object-cover" />
             <span>
               <span className="block text-sm font-semibold">SAVI</span>
               <span className="block text-[11px] text-white/42">by SKH.GLOBAL</span>
             </span>
           </Link>
-          <nav className="flex items-center gap-4 text-xs font-semibold text-white/58">
-            <Link href="/workspace" className="hidden hover:text-white sm:block">Workspace</Link>
-            <Link href="/credits" className="hidden hover:text-white sm:block">Credits</Link>
-            <Link href="/settings" className="hover:text-white">Settings</Link>
+          <nav className="flex items-center gap-2 text-xs font-semibold text-white/58 sm:gap-4">
+            <Link href="/workspace" className="hidden min-h-[44px] items-center hover:text-white sm:flex">Workspace</Link>
+            <Link href="/credits" className="hidden min-h-[44px] items-center hover:text-white sm:flex">Credits</Link>
+            <Link href="/settings" className="flex min-h-[44px] items-center hover:text-white">Settings</Link>
           </nav>
         </div>
       </header>
@@ -76,4 +76,3 @@ export function LegalList({ items }: { items: string[] }) {
     </ul>
   );
 }
-
