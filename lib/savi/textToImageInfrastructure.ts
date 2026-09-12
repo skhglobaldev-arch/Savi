@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { type SaviUser } from '@/lib/auth/session';
+import {
+  resolveSaviAccount,
+  SaviAccountBlockedError,
+  type SaviDatabaseUser
+} from '@/lib/auth/accountBootstrap';
 import { SAVI_COMMERCE_CATALOG_VERSION, SAVI_FREE_WELCOME_CREDITS } from '@/lib/commerce/catalog';
 import { getSaviDataConnect, getSaviPrivateBucket } from '@/lib/firebase/admin';
 import {
@@ -52,15 +57,7 @@ export class SaviInfrastructureError extends Error {
   }
 }
 
-type DatabaseUser = {
-  id: string;
-  provider: string;
-  providerSubject: string;
-  email: string;
-  displayName: string;
-  avatarUrl?: string | null;
-  status: string;
-};
+type DatabaseUser = SaviDatabaseUser;
 
 type CreditAccount = {
   id: string;
@@ -306,50 +303,42 @@ async function ensureWelcomeGrant(databaseUser: DatabaseUser) {
 }
 
 export async function resolveSaviDatabaseUser(user: SaviUser): Promise<DatabaseUser> {
-  const existing = await findUserByIdentity(user);
-  if (existing) {
-    if (existing.status === 'deletion_processing' || existing.status === 'deleted') {
+  try {
+    return await resolveSaviAccount(user, {
+      findUser: findUserByIdentity,
+      touchUser,
+      ensureWelcomeGrant,
+      createDatabaseUser: (databaseUserInput) => ({
+        id: randomUUID(),
+        provider: 'google',
+        providerSubject: databaseUserInput.id,
+        email: databaseUserInput.email,
+        displayName: databaseUserInput.name,
+        avatarUrl: databaseUserInput.picture || null,
+        status: 'active'
+      }),
+      createUserAndAccount: async (_user, databaseUser) => dataConnectMutation('CreateSaviUserAndAccountWithWelcomeGrant', {
+        userId: databaseUser.id,
+        accountId: randomUUID(),
+        grantId: randomUUID(),
+        transactionId: randomUUID(),
+        grantKey: welcomeGrantKeys(databaseUser.id)[0],
+        providerEventId: welcomeGrantKeys(databaseUser.id)[0],
+        provider: databaseUser.provider,
+        providerSubject: databaseUser.providerSubject,
+        email: databaseUser.email,
+        displayName: databaseUser.displayName,
+        avatarUrl: databaseUser.avatarUrl,
+        welcomeCredits: SAVI_FREE_WELCOME_CREDITS,
+        catalogVersion: SAVI_COMMERCE_CATALOG_VERSION,
+        metadata: metadata({ source: 'free_welcome_grant', credits: SAVI_FREE_WELCOME_CREDITS })
+      })
+    });
+  } catch (error) {
+    if (error instanceof SaviAccountBlockedError) {
       throw new SaviInfrastructureError('ACCOUNT_FROZEN', 423, errorMessage('ACCOUNT_FROZEN'));
     }
-    await touchUser(user, existing);
-    if (existing.status === 'active') await ensureWelcomeGrant(existing);
-    return existing;
-  }
-
-  const databaseUser: DatabaseUser = {
-    id: randomUUID(),
-    provider: 'google',
-    providerSubject: user.id,
-    email: user.email,
-    displayName: user.name,
-    avatarUrl: user.picture || null,
-    status: 'active'
-  };
-
-  try {
-    await dataConnectMutation('CreateSaviUserAndAccountWithWelcomeGrant', {
-      userId: databaseUser.id,
-      accountId: randomUUID(),
-      grantId: randomUUID(),
-      transactionId: randomUUID(),
-      grantKey: welcomeGrantKeys(databaseUser.id)[0],
-      providerEventId: welcomeGrantKeys(databaseUser.id)[0],
-      provider: databaseUser.provider,
-      providerSubject: databaseUser.providerSubject,
-      email: databaseUser.email,
-      displayName: databaseUser.displayName,
-      avatarUrl: databaseUser.avatarUrl,
-      welcomeCredits: SAVI_FREE_WELCOME_CREDITS,
-      catalogVersion: SAVI_COMMERCE_CATALOG_VERSION,
-      metadata: metadata({ source: 'free_welcome_grant', credits: SAVI_FREE_WELCOME_CREDITS })
-    });
-    return databaseUser;
-  } catch (error) {
-    const racedUser = await findUserByIdentity(user).catch(() => null);
-    if (racedUser) {
-      if (racedUser.status === 'active') await ensureWelcomeGrant(racedUser);
-      return racedUser;
-    }
+    if (error instanceof SaviInfrastructureError) throw error;
     throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
   }
 }
