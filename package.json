@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "dataconnect:compile:prod": "firebase --project prod --config firebase.production.json dataconnect:compile --service savi-production-607fd-service --location europe-west2",
+    "production:preflight": "node scripts/production-preflight.mjs"
   },
   "dependencies": {
     "firebase-admin": "^14.3.0",

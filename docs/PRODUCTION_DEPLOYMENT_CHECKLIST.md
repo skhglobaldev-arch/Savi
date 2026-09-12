@@ -2,6 +2,13 @@
 
 Internal operational checklist. Do not add secrets or customer data here.
 
+## Phase 6F.4A Production Guardrails
+
+- Keep `default`/`dev` mapped to `savi-257e0` and `prod` mapped to `savi-production-607fd`.
+- Use `npm run production:preflight` before any production release work.
+- Use `npm run dataconnect:compile:prod` for the explicitly production-targeted Data Connect compile. It uses `firebase.production.json` and never relies on the default Firebase project.
+- The private GitHub repository `skhglobaldev-arch/Savi` is connected to App Hosting on `main`; automatic rollout may occur after a push to the live branch. Do not push to `main` without the explicit production rollout gate.
+
 ## Environment Inventory
 
 ### Required for local development

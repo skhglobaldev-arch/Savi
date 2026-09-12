@@ -1,0 +1,12 @@
+specVersion: "v1"
+serviceId: "savi-production-607fd-service"
+location: "europe-west2"
+schemas:
+  - source: "../schema"
+    datasource:
+      postgresql:
+        database: "savi-production-607fd-database"
+        cloudSql:
+          instanceId: "savi-production-607fd-instance"
+          schemaValidation: "COMPATIBLE"
+connectorDirs: ["../savi"]
