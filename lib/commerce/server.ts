@@ -21,9 +21,11 @@ import {
 import { getStripeClient } from '@/lib/commerce/stripe';
 import { getSaviDataConnect } from '@/lib/firebase/admin';
 import {
+  assertSaviAccountCanMutate,
   getAuthoritativeCreditAccountByUserId,
   getAuthoritativeCreditBalance,
-  resolveSaviDatabaseUser
+  resolveSaviDatabaseUser,
+  SaviInfrastructureError
 } from '@/lib/savi/textToImageInfrastructure';
 import { type NextRequest } from 'next/server';
 
@@ -411,6 +413,14 @@ export async function getCommerceAccountState(user: SaviUser) {
 
 export async function createSubscriptionCheckout(user: SaviUser, planId: string, origin: string) {
   const plan = getActiveCommercePlan(planId);
+  try {
+    await assertSaviAccountCanMutate(user);
+  } catch (error) {
+    if (error instanceof SaviInfrastructureError) {
+      throw new CommerceError(error.category, error.status, error.message);
+    }
+    throw error;
+  }
   const { databaseUser, commerceCustomer } = await getOrCreateStripeCommerceCustomer(user);
   const commonMetadata = checkoutMetadata(databaseUser, commerceCustomer, plan);
   const session = await getStripeClient().checkout.sessions.create({
@@ -430,6 +440,14 @@ export async function createSubscriptionCheckout(user: SaviUser, planId: string,
 
 export async function createTopUpCheckout(user: SaviUser, packId: string, origin: string) {
   const pack = getActiveTopUpPack(packId);
+  try {
+    await assertSaviAccountCanMutate(user);
+  } catch (error) {
+    if (error instanceof SaviInfrastructureError) {
+      throw new CommerceError(error.category, error.status, error.message);
+    }
+    throw error;
+  }
   const { databaseUser, commerceCustomer } = await getOrCreateStripeCommerceCustomer(user);
   const commonMetadata = checkoutMetadata(databaseUser, commerceCustomer, pack);
   const session = await getStripeClient().checkout.sessions.create({

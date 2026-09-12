@@ -55,7 +55,14 @@ query FindAccountDeletionRequest($userId: UUID!) @auth(level: NO_ACCESS) {
     userId
     status
     requestedAt
+    startedAt
     processedAt
+    updatedAt
+    attemptCount
+    assetsTotal
+    assetsDeleted
+    lastErrorCode
+    lastErrorMessage
     metadata
   }
 }
@@ -65,12 +72,252 @@ mutation RequestAccountDeletion(
   $userId: UUID!
   $metadata: String!
 ) @transaction @auth(level: NO_ACCESS) {
+  saviUser_updateMany(
+    where: { id: { eq: $userId }, status: { eq: "active" } }
+    data: {
+      status: "deletion_requested"
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "SAVI_USER_NOT_ACTIVE")
   accountDeletionRequest_insert(data: {
     id: $id
     userId: $userId
     status: "requested"
+    updatedAt_expr: "request.time"
     metadata: $metadata
   })
+}
+
+mutation ReopenAccountDeletionRequest(
+  $requestId: UUID!
+  $userId: UUID!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  saviUser_updateMany(
+    where: { id: { eq: $userId }, status: { eq: "active" } }
+    data: {
+      status: "deletion_requested"
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "SAVI_USER_NOT_ACTIVE")
+  accountDeletionRequest_updateMany(
+    where: { id: { eq: $requestId }, userId: { eq: $userId }, status: { eq: "cancelled" } }
+    data: {
+      status: "requested"
+      requestedAt_expr: "request.time"
+      updatedAt_expr: "request.time"
+      attemptCount: 0
+      assetsTotal: 0
+      assetsDeleted: 0
+      lastErrorCode: null
+      lastErrorMessage: null
+      metadata: $metadata
+    }
+  ) @check(expr: "this == 1", message: "DELETION_REQUEST_NOT_CANCELLABLE")
+}
+
+mutation WithdrawAccountDeletionRequest(
+  $requestId: UUID!
+  $userId: UUID!
+  $expectedStatus: String!
+  $expectedUserStatus: String!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  saviUser_updateMany(
+    where: { id: { eq: $userId }, status: { eq: $expectedUserStatus } }
+    data: {
+      status: "active"
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "DELETION_REQUEST_NOT_CANCELLABLE")
+  accountDeletionRequest_updateMany(
+    where: {
+      id: { eq: $requestId }
+      userId: { eq: $userId }
+      status: { eq: $expectedStatus }
+    }
+    data: {
+      status: "cancelled"
+      updatedAt_expr: "request.time"
+      metadata: $metadata
+    }
+  ) @check(expr: "this == 1", message: "DELETION_REQUEST_NOT_CANCELLABLE")
+}
+
+query GetAccountDeletionProcessorContext($userId: UUID!) @auth(level: NO_ACCESS) {
+  saviUsers(where: { id: { eq: $userId } }, limit: 1) {
+    id
+    provider
+    providerSubject
+    email
+    displayName
+    avatarUrl
+    status
+  }
+  accountDeletionRequests(where: { userId: { eq: $userId } }, limit: 1) {
+    id
+    userId
+    status
+    requestedAt
+    startedAt
+    processedAt
+    updatedAt
+    attemptCount
+    assetsTotal
+    assetsDeleted
+    lastErrorCode
+    lastErrorMessage
+    metadata
+  }
+  creditAccounts(where: { userId: { eq: $userId } }, limit: 1) {
+    id
+    userId
+    availableCredits
+    reservedCredits
+    subscriptionCredits
+    reservedSubscriptionCredits
+  }
+  commerceSubscriptions(where: { userId: { eq: $userId } }, limit: 100) {
+    id
+    status
+    providerStatus
+    providerSubscriptionId
+    providerCustomerId
+    currentPeriodEnd
+  }
+  commercePurchases(where: { userId: { eq: $userId } }, limit: 100) {
+    id
+    status
+    provider
+    providerPaymentIntentId
+    providerCheckoutSessionId
+    providerInvoiceId
+  }
+  creditReservations(where: { userId: { eq: $userId } }, limit: 100) {
+    id
+    jobId
+    amount
+    status
+  }
+  generationJobs(where: { userId: { eq: $userId } }, limit: 100) {
+    id
+    status
+    reservedCredits
+  }
+}
+
+query ListAccountAssets($userId: UUID!, $offset: Int!) @auth(level: NO_ACCESS) {
+  assets(where: { userId: { eq: $userId } }, limit: 100, offset: $offset) {
+    id
+    storagePath
+    status
+  }
+}
+
+mutation ClaimAccountDeletionProcessing(
+  $requestId: UUID!
+  $userId: UUID!
+  $expectedRequestStatus: String!
+  $expectedUserStatus: String!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  saviUser_updateMany(
+    where: { id: { eq: $userId }, status: { eq: $expectedUserStatus } }
+    data: {
+      status: "deletion_processing"
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "DELETION_USER_STATE_CHANGED")
+  accountDeletionRequest_updateMany(
+    where: {
+      id: { eq: $requestId }
+      userId: { eq: $userId }
+      status: { eq: $expectedRequestStatus }
+    }
+    data: {
+      status: "processing"
+      startedAt_expr: "request.time"
+      attemptCount_update: { inc: 1 }
+      updatedAt_expr: "request.time"
+      lastErrorCode: null
+      lastErrorMessage: null
+      metadata: $metadata
+    }
+  ) @check(expr: "this == 1", message: "DELETION_REQUEST_STATE_CHANGED")
+}
+
+mutation UpdateAccountDeletionProgress(
+  $requestId: UUID!
+  $userId: UUID!
+  $expectedStatus: String!
+  $status: String!
+  $assetsTotal: Int!
+  $assetsDeleted: Int!
+  $lastErrorCode: String
+  $lastErrorMessage: String
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  accountDeletionRequest_updateMany(
+    where: {
+      id: { eq: $requestId }
+      userId: { eq: $userId }
+      status: { eq: $expectedStatus }
+    }
+    data: {
+      status: $status
+      assetsTotal: $assetsTotal
+      assetsDeleted: $assetsDeleted
+      lastErrorCode: $lastErrorCode
+      lastErrorMessage: $lastErrorMessage
+      metadata: $metadata
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "DELETION_REQUEST_STATE_CHANGED")
+}
+
+mutation MarkAccountAssetErased(
+  $assetId: UUID!
+  $userId: UUID!
+  $expectedStatus: String!
+) @transaction @auth(level: NO_ACCESS) {
+  asset_updateMany(
+    where: { id: { eq: $assetId }, userId: { eq: $userId }, status: { eq: $expectedStatus } }
+    data: { status: "erased" }
+  ) @check(expr: "this == 1", message: "ASSET_STATE_CHANGED")
+}
+
+mutation CompleteAccountDeletion(
+  $requestId: UUID!
+  $userId: UUID!
+  $tombstoneEmail: String!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  saviUser_updateMany(
+    where: { id: { eq: $userId }, status: { eq: "deletion_processing" } }
+    data: {
+      email: $tombstoneEmail
+      displayName: "Deleted account"
+      avatarUrl: null
+      status: "deleted"
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "DELETION_USER_STATE_CHANGED")
+  commerceCustomer_updateMany(
+    where: { userId: { eq: $userId } }
+    data: {
+      email: null
+      updatedAt_expr: "request.time"
+    }
+  )
+  accountDeletionRequest_updateMany(
+    where: { id: { eq: $requestId }, userId: { eq: $userId }, status: { eq: "processing" } }
+    data: {
+      status: "completed"
+      processedAt_expr: "request.time"
+      updatedAt_expr: "request.time"
+      metadata: $metadata
+    }
+  ) @check(expr: "this == 1", message: "DELETION_REQUEST_STATE_CHANGED")
 }
 
 mutation CreateSaviUserAndAccount(
@@ -230,6 +477,11 @@ mutation GrantWelcomeCredit(
   $catalogVersion: String!
   $metadata: String!
 ) @transaction @auth(level: NO_ACCESS) {
+  query @check(expr: "response.query.saviUsers.size() == 1", message: "SAVI_USER_NOT_ACTIVE") {
+    saviUsers(where: { id: { eq: $userId }, status: { eq: "active" } }, limit: 1) {
+      id
+    }
+  }
   creditGrant_insert(data: {
     id: $grantId
     grantKey: $grantKey
@@ -300,17 +552,21 @@ mutation ReconcileDuplicateWelcomeGrant(
 
 mutation TouchSaviUser(
   $userId: UUID!
+  $expectedStatus: String = "active"
   $email: String!
   $displayName: String!
   $avatarUrl: String
-) @auth(level: NO_ACCESS) {
-  saviUser_update(id: $userId, data: {
-    email: $email
-    displayName: $displayName
-    avatarUrl: $avatarUrl
-    updatedAt_expr: "request.time"
-    lastLoginAt_expr: "request.time"
-  })
+) @transaction @auth(level: NO_ACCESS) {
+  saviUser_updateMany(
+    where: { id: { eq: $userId }, status: { eq: $expectedStatus } }
+    data: {
+      email: $email
+      displayName: $displayName
+      avatarUrl: $avatarUrl
+      updatedAt_expr: "request.time"
+      lastLoginAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "SAVI_USER_STATE_CHANGED")
 }
 
 query GetCreditAccount($userId: UUID!) @auth(level: NO_ACCESS) {

@@ -9,9 +9,9 @@ import {
   type SaviPricingQuote
 } from '@/lib/pricing/saviPricing';
 import {
+  assertSaviAccountCanMutate,
   getAuthoritativeCreditBalance,
   getAuthoritativeCreditAccountByUserId,
-  resolveSaviDatabaseUser,
   SaviInfrastructureError,
   type PrivateAsset,
   type SaviFailureCategory
@@ -528,7 +528,7 @@ export async function runProtectedOperation(input: SaviProtectedOperationRequest
     throw new SaviInfrastructureError('INVALID_INPUT', 400, publicFailureMessage('INVALID_INPUT'));
   }
 
-  const databaseUser = await resolveSaviDatabaseUser(input.user);
+  const databaseUser = await assertSaviAccountCanMutate(input.user);
   const existing = await resolveExistingJobForTool(databaseUser.id, input.clientRequestId, input.toolId);
   if (existing) {
     const availableCredits = await balanceFor(input.user);
@@ -696,7 +696,7 @@ export async function recordFreeAiUsage(input: {
   providerRequestId?: string;
   metadata?: Record<string, string | number | boolean | null>;
 }) {
-  const databaseUser = await resolveSaviDatabaseUser(input.user);
+  const databaseUser = await assertSaviAccountCanMutate(input.user);
   // Free-chat telemetry shares GenerationJob's idempotency namespace. Prefixing
   // the client request keeps a retry idempotent for this telemetry event while
   // preventing it from colliding with a paid generation submitted by the same

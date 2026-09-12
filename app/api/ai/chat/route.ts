@@ -6,6 +6,7 @@ import { getSaviFairUseConfig } from '@/lib/savi/fairUse';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 import { recordFreeAiUsage } from '@/lib/savi/protectedOperations';
+import { assertSaviAccountCanMutate, SaviInfrastructureError } from '@/lib/savi/textToImageInfrastructure';
 
 export const runtime = 'nodejs';
 
@@ -107,6 +108,12 @@ export async function POST(request: NextRequest) {
   const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
   if (!session) {
     return NextResponse.json({ error: 'Please sign in to chat with SAVI.', category: 'AUTH_REQUIRED' }, { status: 401 });
+  }
+  try {
+    await assertSaviAccountCanMutate(session);
+  } catch (error) {
+    if (error instanceof SaviInfrastructureError) return NextResponse.json({ error: error.message, category: error.category }, { status: error.status });
+    return NextResponse.json({ error: 'SAVI chat is temporarily unavailable.', category: 'ACCOUNT_UNAVAILABLE' }, { status: 503 });
   }
   const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'FREE_AI', identity: getSaviRequestIdentity(request, session.id) });
   if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);

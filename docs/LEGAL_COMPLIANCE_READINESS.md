@@ -11,7 +11,8 @@ Internal product-readiness record for the Phase 6C legal surfaces. This is not l
 - Browser local storage currently contains chat history, saved outputs, media-library references, and UI preferences. Session storage is used for short-lived request coordination.
 - Operational logging is structured and intentionally excludes prompts, raw files, cookies, tokens, provider keys, and raw IP addresses. Firestore is used for server-side rate-limit records only.
 - Stripe webhook handling is idempotent for payment events and credit grants. Refund/dispute events update purchase status and do not blindly subtract credits or force a negative account balance.
-- There is no implemented universal retention schedule, automated data-erasure job, or analytics/marketing stack. An authenticated deletion-request endpoint and Settings control now record requests, and versioned Terms/Privacy acknowledgement records are written for authenticated sessions.
+- There is no universal retention schedule or automatic erasure job, and no analytics/marketing stack. An authenticated deletion-request endpoint and Settings control record requests, while the additive erasure processor remains explicitly opt-in with no public execution route. Versioned Terms/Privacy acknowledgement records are written for authenticated sessions.
+- Deletion processing is designed to freeze new mutations, preserve financial/audit records, delete private generated assets, and anonymize eligible profile fields. It does not delete Stripe, Gemini, Google, or provider-backup data, and it must remain disabled until retention and financial dependency policies are approved.
 
 ## Configuration required before launch
 

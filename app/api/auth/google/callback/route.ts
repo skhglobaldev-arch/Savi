@@ -12,6 +12,7 @@ import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rate
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 import { assertSaviProductionConfiguration } from '@/lib/config/saviConfig';
 import { logOperational } from '@/lib/observability/logger';
+import { findExistingSaviDatabaseUser } from '@/lib/savi/textToImageInfrastructure';
 
 export const runtime = 'nodejs';
 
@@ -86,6 +87,11 @@ export async function GET(request: NextRequest) {
       name: profile.name?.trim() || profile.email.split('@')[0],
       picture: profile.picture
     };
+    const existingDatabaseUser = await findExistingSaviDatabaseUser({ ...user, planId: 'free' });
+    if (existingDatabaseUser && ['deletion_processing', 'deleted'].includes(existingDatabaseUser.status)) {
+      logOperational('warn', 'google_auth_callback_rejected', { reason: 'account_deletion_in_progress' });
+      return redirectWithStatus(request, 'unavailable');
+    }
     const redirectBase = process.env.NODE_ENV === 'production' ? process.env.SAVI_APP_ORIGIN || request.url : request.url;
     const response = NextResponse.redirect(new URL(returnTo, redirectBase));
     response.cookies.set(SAVI_SESSION_COOKIE, createSessionToken(user), {

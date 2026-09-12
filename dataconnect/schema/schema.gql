@@ -32,7 +32,14 @@ type AccountDeletionRequest
   user: SaviUser! @ref(fields: "userId", references: "id")
   status: String! @default(value: "requested")
   requestedAt: Timestamp! @default(expr: "request.time")
+  startedAt: Timestamp
   processedAt: Timestamp
+  updatedAt: Timestamp! @default(expr: "request.time")
+  attemptCount: Int! @default(value: 0)
+  assetsTotal: Int! @default(value: 0)
+  assetsDeleted: Int! @default(value: 0)
+  lastErrorCode: String
+  lastErrorMessage: String
   metadata: String
 }
 

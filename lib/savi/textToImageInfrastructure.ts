@@ -36,6 +36,7 @@ export type SaviFailureCategory =
   | 'INSUFFICIENT_CREDITS'
   | 'STORAGE_FAILURE'
   | 'AUTH_REQUIRED'
+  | 'ACCOUNT_FROZEN'
   | 'PRICING_NOT_CONFIGURED'
   | 'INTERNAL_ERROR';
 
@@ -201,6 +202,8 @@ function errorMessage(category: SaviFailureCategory) {
       return 'SAVI could not save the generated image. Your credits were not used.';
     case 'PRICING_NOT_CONFIGURED':
       return 'This image configuration is not available right now. No credits were used.';
+    case 'ACCOUNT_FROZEN':
+      return 'This SAVI account is unavailable while its deletion request is being processed.';
     default:
       return 'SAVI could not complete that image request. Please try again.';
   }
@@ -251,9 +254,11 @@ async function findUserByIdentity(user: SaviUser) {
 }
 
 async function touchUser(user: SaviUser, databaseUser: DatabaseUser) {
+  if (databaseUser.status !== 'active' && databaseUser.status !== 'deletion_requested') return;
   try {
     await dataConnectMutation('TouchSaviUser', {
       userId: databaseUser.id,
+      expectedStatus: databaseUser.status,
       email: user.email,
       displayName: user.name,
       avatarUrl: user.picture || null
@@ -303,8 +308,11 @@ async function ensureWelcomeGrant(databaseUser: DatabaseUser) {
 export async function resolveSaviDatabaseUser(user: SaviUser): Promise<DatabaseUser> {
   const existing = await findUserByIdentity(user);
   if (existing) {
+    if (existing.status === 'deletion_processing' || existing.status === 'deleted') {
+      throw new SaviInfrastructureError('ACCOUNT_FROZEN', 423, errorMessage('ACCOUNT_FROZEN'));
+    }
     await touchUser(user, existing);
-    await ensureWelcomeGrant(existing);
+    if (existing.status === 'active') await ensureWelcomeGrant(existing);
     return existing;
   }
 
@@ -339,11 +347,23 @@ export async function resolveSaviDatabaseUser(user: SaviUser): Promise<DatabaseU
   } catch (error) {
     const racedUser = await findUserByIdentity(user).catch(() => null);
     if (racedUser) {
-      await ensureWelcomeGrant(racedUser);
+      if (racedUser.status === 'active') await ensureWelcomeGrant(racedUser);
       return racedUser;
     }
     throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
   }
+}
+
+export async function findExistingSaviDatabaseUser(user: SaviUser) {
+  return findUserByIdentity(user);
+}
+
+export async function assertSaviAccountCanMutate(user: SaviUser) {
+  const databaseUser = await resolveSaviDatabaseUser(user);
+  if (databaseUser.status !== 'active' && databaseUser.status !== 'deletion_requested') {
+    throw new SaviInfrastructureError('ACCOUNT_FROZEN', 423, errorMessage('ACCOUNT_FROZEN'));
+  }
+  return databaseUser;
 }
 
 async function findCreditAccount(userId: string) {
@@ -728,7 +748,7 @@ export async function runProtectedTextToImage(input: ProtectedTextToImageRequest
     throw new SaviInfrastructureError('INVALID_INPUT', 400, errorMessage('INVALID_INPUT'));
   }
 
-  const databaseUser = await resolveSaviDatabaseUser(input.user);
+  const databaseUser = await assertSaviAccountCanMutate(input.user);
   const existing = await existingTextToImageJobResult(databaseUser.id, input.clientRequestId);
   if (existing) {
     const availableCredits = await spendableCredits(databaseUser.id).catch(() => undefined);
