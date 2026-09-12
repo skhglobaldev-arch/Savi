@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
-import { requestGeminiWithFallback } from '@/lib/ai/geminiResilience';
+import { GeminiUnavailableError, requestGeminiWithFallback } from '@/lib/ai/geminiResilience';
 import { getConfiguredTextModels } from '@/lib/pricing/saviPricing';
+import { logOperational } from '@/lib/observability/logger';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 import { recordFreeAiUsage } from '@/lib/savi/protectedOperations';
@@ -74,6 +75,17 @@ function usageFromProvider(data: Record<string, unknown>) {
     inputTokens: typeof inputTokens === 'number' ? inputTokens : undefined,
     outputTokens: typeof outputTokens === 'number' ? outputTokens : undefined
   };
+}
+
+function logProviderFallback(route: string, error: unknown) {
+  const attempts = error instanceof GeminiUnavailableError ? error.attempts : [];
+  logOperational('warn', 'savi_ai_provider_fallback', {
+    route,
+    reason: error instanceof GeminiUnavailableError ? 'provider_unavailable' : 'unexpected_provider_failure',
+    attemptCount: attempts.length,
+    models: attempts.map((attempt) => attempt.model).join(',').slice(0, 240),
+    statuses: attempts.map((attempt) => typeof attempt.status === 'number' ? String(attempt.status) : 'network').join(',').slice(0, 120)
+  });
 }
 
 async function recordUsageSafely(input: Parameters<typeof recordFreeAiUsage>[0]) {
@@ -402,7 +414,8 @@ export async function POST(request: NextRequest) {
       data = result.data;
       model = result.model;
       providerRequestId = result.providerRequestId;
-    } catch {
+    } catch (error) {
+      logProviderFallback('ai/agent', error);
       await recordUsageSafely({
         user: session,
         clientRequestId: body.clientRequestId,
