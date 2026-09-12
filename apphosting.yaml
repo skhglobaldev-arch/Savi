@@ -1,0 +1,33 @@
+env:
+  - variable: GOOGLE_CLIENT_ID
+    value: 317496174066-29fu179gssjot0vd8v5kfdu6cfl1fd77.apps.googleusercontent.com
+  - variable: GOOGLE_CLIENT_SECRET
+    secret: GOOGLE_CLIENT_SECRET
+  - variable: SAVI_AUTH_SECRET
+    secret: SAVI_AUTH_SECRET
+  - variable: GEMINI_API_KEY
+    secret: GEMINI_API_KEY
+  - variable: STRIPE_SECRET_KEY
+    secret: STRIPE_SECRET_KEY
+  - variable: STRIPE_WEBHOOK_SECRET
+    secret: STRIPE_WEBHOOK_SECRET
+  - variable: FIREBASE_PROJECT_ID
+    value: savi-production-607fd
+  - variable: FIREBASE_STORAGE_BUCKET
+    value: savi-production-607fd.firebasestorage.app
+  - variable: FIREBASE_DATA_CONNECT_SERVICE_ID
+    value: savi-production-607fd-service
+  - variable: FIREBASE_DATA_CONNECT_LOCATION
+    value: europe-west2
+  - variable: FIREBASE_DATA_CONNECT_CONNECTOR
+    value: savi
+  - variable: SAVI_APP_ORIGIN
+    value: https://savi.skh.global
+  - variable: SAVI_TRUSTED_PROXY
+    value: "false"
+  - variable: SAVI_COMMERCE_CATALOG_VERSION
+    value: 2026-09-savi-commerce-v1
+  - variable: SAVI_COMMERCE_PLANS_JSON
+    value: '[{"id":"free","displayName":"Free","provider":"internal","stripeProductId":"","stripePriceId":"","billingInterval":"month","currency":"gbp","amountMinor":0,"priceDisplay":"£0","includedRecurringCredits":0,"oneTimeWelcomeCredits":300,"rolloverCapCredits":0,"entitlements":["standard_tools"],"recommended":false,"status":"active","catalogVersion":"2026-09-savi-commerce-v1"},{"id":"starter","displayName":"Starter","provider":"stripe","stripeProductId":"prod_VF4SuIqdVFPHQ1","stripePriceId":"price_1UEaJvCJWxIY7X1keYRJ2VVO","billingInterval":"month","currency":"gbp","amountMinor":999,"priceDisplay":"£9.99","includedRecurringCredits":3000,"oneTimeWelcomeCredits":0,"rolloverCapCredits":6000,"entitlements":["standard_tools"],"recommended":false,"status":"active","catalogVersion":"2026-09-savi-commerce-v1"},{"id":"creator","displayName":"Creator","provider":"stripe","stripeProductId":"prod_VF4TfbtYh2F1Ne","stripePriceId":"price_1UEaKJCJWxIY7X1kb0etGqaV","billingInterval":"month","currency":"gbp","amountMinor":1999,"priceDisplay":"£19.99","includedRecurringCredits":7500,"oneTimeWelcomeCredits":0,"rolloverCapCredits":15000,"entitlements":["standard_tools","priority_generation"],"recommended":true,"status":"active","catalogVersion":"2026-09-savi-commerce-v1"},{"id":"pro","displayName":"Pro","provider":"stripe","stripeProductId":"prod_VF4T9rJKcwBQtK","stripePriceId":"price_1UEaKYCJWxIY7X1kRrXHhijs","billingInterval":"month","currency":"gbp","amountMinor":3999,"priceDisplay":"£39.99","includedRecurringCredits":17500,"oneTimeWelcomeCredits":0,"rolloverCapCredits":35000,"entitlements":["standard_tools","priority_generation","team_billing"],"recommended":false,"status":"active","catalogVersion":"2026-09-savi-commerce-v1"}]'
+  - variable: SAVI_COMMERCE_TOPUPS_JSON
+    value: '[{"id":"topup-1000","displayName":"1,000 credits","stripeProductId":"prod_VF4TiVogENQ70I","stripePriceId":"price_1UEaKpCJWxIY7X1ksYJxym6z","currency":"gbp","amountMinor":499,"priceDisplay":"£4.99","creditsGranted":1000,"status":"active","catalogVersion":"2026-09-savi-commerce-v1"},{"id":"topup-3000","displayName":"3,000 credits","stripeProductId":"prod_VF4USCOZ5lgKKm","stripePriceId":"price_1UEaL4CJWxIY7X1kaLOlFumO","currency":"gbp","amountMinor":1299,"priceDisplay":"£12.99","creditsGranted":3000,"status":"active","catalogVersion":"2026-09-savi-commerce-v1"},{"id":"topup-7500","displayName":"7,500 credits","stripeProductId":"prod_VF4UuO4QvVKgmt","stripePriceId":"price_1UEaLSCJWxIY7X1km9loDvts","currency":"gbp","amountMinor":2799,"priceDisplay":"£27.99","creditsGranted":7500,"status":"active","catalogVersion":"2026-09-savi-commerce-v1"},{"id":"topup-15000","displayName":"15,000 credits","stripeProductId":"prod_VF4UkiJoEVLyhR","stripePriceId":"price_1UEaLlCJWxIY7X1kKY25NBdW","currency":"gbp","amountMinor":4999,"priceDisplay":"£49.99","creditsGranted":15000,"status":"active","catalogVersion":"2026-09-savi-commerce-v1"}]'

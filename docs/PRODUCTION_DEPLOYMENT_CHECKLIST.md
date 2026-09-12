@@ -39,10 +39,34 @@ Internal operational checklist. Do not add secrets or customer data here.
 
 Keep `SAVI_AUTH_SECRET`, `GOOGLE_CLIENT_SECRET`, `GEMINI_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, ADC credentials, and Firebase Admin runtime configuration out of browser bundles and source control. `.env.example` contains names and safe placeholders only.
 
+## Stage 2 Provisioning Checklist
+
+Complete these steps only after the production project, owner, region, and budget are approved. Keep `savi-257e0` as development/validation; do not point a production alias at it.
+
+- [ ] Create the separate production Firebase/GCP project.
+- [ ] Attach the approved billing account.
+- [ ] Add the production Firebase CLI alias after the real project exists: `firebase use --add <PRODUCTION_PROJECT_ID>`, then save the alias as `prod`.
+- [ ] Provision the production Data Connect service and Cloud SQL database/instance in the approved region.
+- [ ] Create the separate private production Storage bucket.
+- [ ] Enable Firestore for the production project.
+- [ ] Configure the managed runtime identity and least-privilege IAM.
+- [ ] Configure the Firebase App Hosting backend for the production branch and Node.js `>=20.9.0`.
+- [ ] Add production secrets through the hosting secret/configuration store.
+- [ ] Configure `SAVI_APP_ORIGIN` with the canonical HTTPS origin.
+- [ ] Register the production Google OAuth client and callback.
+- [ ] Configure the production domain and HTTPS.
+- [ ] Configure Cloud SQL backups and point-in-time recovery.
+- [ ] Configure platform logs, uptime checks, and alerts.
+- [ ] Run production smoke checks before enabling public traffic.
+- [ ] Leave Stripe Live configuration for Phase 6F.2.
+- [ ] Leave legal completion and final legal values for Phase 6F.3.
+
+Data Connect configuration is project-specific. Once the real production service, database, instance, region, and connector values exist, update a reviewed production deployment copy of `dataconnect/dataconnect.yaml` and the matching runtime environment values. Compile and review the schema/operation diff before any deployment; do not add fake project identifiers or replace the development target prematurely.
+
 ## Architecture Checks
 
-- Confirm the Firebase project is `savi-257e0` or the explicitly approved production project.
-- Confirm Data Connect remains `savi-257e0-service` in `europe-west2`, connector `savi`, and Cloud SQL database `savi-257e0-database` / instance `savi-257e0-instance` unless an approved production target differs.
+- Keep `savi-257e0` as the development/validation project. Confirm production uses the explicitly approved separate project.
+- For development, confirm Data Connect remains `savi-257e0-service` in `europe-west2`, connector `savi`, and Cloud SQL database `savi-257e0-database` / instance `savi-257e0-instance`. For production, verify the separately provisioned target values instead.
 - Keep Data Connect operations `@auth(level: NO_ACCESS)` and callable only through Firebase Admin server code.
 - Keep the Firebase Storage bucket private; generated assets remain owner-checked through `/api/assets/[assetId]`.
 - Keep Firestore limited to server-side `savi_rate_limits` records. It is not the credit, account, reservation, or commerce authority.

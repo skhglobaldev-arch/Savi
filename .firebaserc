@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "savi-257e0"
+    "default": "savi-257e0",
+    "dev": "savi-257e0",
+    "prod": "savi-production-607fd"
   }
 }
