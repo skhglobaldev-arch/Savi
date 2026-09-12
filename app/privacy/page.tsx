@@ -51,12 +51,12 @@ export default function PrivacyPage() {
       </LegalSection>
 
       <LegalSection title="6. Retention, deletion, and account requests">
-        <p>The current implementation does not define a universal retention schedule, automated deletion job, or self-serve account deletion control. Generated assets, account records, usage records, billing records, and provider-held data may therefore remain until an operational deletion process is applied.</p>
-        <p>Before launch, the operator must approve retention periods, deletion workflows, backup handling, provider deletion requests, and the process for access, correction, restriction, objection, portability, and deletion requests. Contact {legal.contactEmail} for requests once that contact is configured.</p>
+        <p>The current implementation provides an authenticated account-deletion request control. It does not automatically erase account, billing, usage, asset, backup, or provider-held records, and those records may remain until the approved operational deletion process is completed.</p>
+        <p>Before launch, the operator must approve retention periods, final erasure steps, backup handling, provider deletion requests, and the process for access, correction, restriction, objection, portability, and deletion requests. Contact {legal.contactEmail} for requests once that contact is configured.</p>
       </LegalSection>
 
       <LegalSection title="7. Children">
-        <p>SAVI is not presented as a service for children. The operator must finalize the minimum-age approach, UK/EEA child-data handling, and any parental-consent process before launch. Do not submit a child's information unless you have a lawful basis and authorization to do so.</p>
+        <p>SAVI is intended for users aged 18 or over and is not presented as a service for children. The operator must finalize UK/EEA child-data handling and any parental-consent process before launch. Do not submit a child's information unless you have a lawful basis and authorization to do so.</p>
       </LegalSection>
 
       <LegalSection title="8. Security limits">

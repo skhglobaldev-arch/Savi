@@ -11,6 +11,31 @@ type SaviUser @table(name: "savi_users") @unique(fields: ["provider", "providerS
   lastLoginAt: Timestamp! @default(expr: "request.time")
 }
 
+type LegalConsent
+  @table(name: "legal_consents")
+  @unique(fields: ["userId", "consentType", "policyVersion"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  consentType: String!
+  policyVersion: String!
+  source: String!
+  metadata: String
+  acceptedAt: Timestamp! @default(expr: "request.time")
+}
+
+type AccountDeletionRequest
+  @table(name: "account_deletion_requests")
+  @unique(fields: ["userId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  status: String! @default(value: "requested")
+  requestedAt: Timestamp! @default(expr: "request.time")
+  processedAt: Timestamp
+  metadata: String
+}
+
 type CreditAccount @table(name: "credit_accounts") {
   id: UUID! @default(expr: "uuidV4()")
   userId: UUID! @unique

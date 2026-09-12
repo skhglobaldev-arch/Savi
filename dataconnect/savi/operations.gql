@@ -13,6 +13,66 @@ query FindSaviUserByProvider($provider: String!, $providerSubject: String!) @aut
   }
 }
 
+query FindLegalConsent($userId: UUID!, $consentType: String!, $policyVersion: String!) @auth(level: NO_ACCESS) {
+  legalConsents(
+    where: {
+      userId: { eq: $userId }
+      consentType: { eq: $consentType }
+      policyVersion: { eq: $policyVersion }
+    }
+    limit: 1
+  ) {
+    id
+    userId
+    consentType
+    policyVersion
+    source
+    acceptedAt
+  }
+}
+
+mutation RecordLegalConsent(
+  $id: UUID!
+  $userId: UUID!
+  $consentType: String!
+  $policyVersion: String!
+  $source: String!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  legalConsent_insert(data: {
+    id: $id
+    userId: $userId
+    consentType: $consentType
+    policyVersion: $policyVersion
+    source: $source
+    metadata: $metadata
+  })
+}
+
+query FindAccountDeletionRequest($userId: UUID!) @auth(level: NO_ACCESS) {
+  accountDeletionRequests(where: { userId: { eq: $userId } }, limit: 1) {
+    id
+    userId
+    status
+    requestedAt
+    processedAt
+    metadata
+  }
+}
+
+mutation RequestAccountDeletion(
+  $id: UUID!
+  $userId: UUID!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  accountDeletionRequest_insert(data: {
+    id: $id
+    userId: $userId
+    status: "requested"
+    metadata: $metadata
+  })
+}
+
 mutation CreateSaviUserAndAccount(
   $userId: UUID!
   $accountId: UUID!

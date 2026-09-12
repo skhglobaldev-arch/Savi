@@ -16,7 +16,7 @@ export default function TermsPage() {
     >
       <LegalSection title="1. Operator and acceptance">
         <p>These terms are provided by {legal.operatorName}, whose business address is {legal.businessAddress}. They take effect on {legal.effectiveDate}. By creating or using a SAVI account, or by continuing after these terms are presented, you agree to them and the Privacy Policy. If you do not agree, do not use SAVI.</p>
-        <p>The governing-law and venue provision is not finalized. It must be set to {legal.governingLaw} after professional legal review before launch.</p>
+        <p>The intended governing-law position is England and Wales, subject to professional legal review and final operator confirmation before launch.</p>
       </LegalSection>
 
       <LegalSection title="2. Accounts and responsibilities">

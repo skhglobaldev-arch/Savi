@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { SaviSidebar } from '@/components/SaviSidebar';
 import { useCommerceAccount } from '@/lib/commerce/useCommerceAccount';
 import { useAuthoritativeCredits } from '@/lib/savi/useAuthoritativeCredits';
@@ -9,13 +10,31 @@ import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 
 export default function SettingsPage() {
   const { credits } = useAuthoritativeCredits();
-  const { user, signIn } = useSaviAuth();
+  const { user, signIn, signOut } = useSaviAuth();
   const { state, error, isLoading, pendingAction, openBillingPortal } = useCommerceAccount();
+  const [deletionState, setDeletionState] = useState<'idle' | 'submitting' | 'requested'>('idle');
+  const [deletionError, setDeletionError] = useState<string | null>(null);
   const currentSubscription = state?.currentSubscription ?? null;
   const currentPlan = currentSubscription
     ? state?.catalog.plans.find((plan) => plan.id === currentSubscription.planId) ?? null
     : state?.catalog.plans.find((plan) => plan.id === 'free') ?? null;
   const planName = currentPlan?.displayName ?? (user ? 'Plan unavailable' : 'Free plan');
+
+  async function requestAccountDeletion() {
+    if (!window.confirm('Request deletion of this SAVI account?')) return;
+    setDeletionState('submitting');
+    setDeletionError(null);
+    try {
+      const response = await fetch('/api/account/deletion-request', { method: 'POST' });
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!response.ok || !data.ok) throw new Error(data.error || 'SAVI could not record the deletion request.');
+      setDeletionState('requested');
+      await signOut();
+    } catch (requestError) {
+      setDeletionState('idle');
+      setDeletionError(requestError instanceof Error ? requestError.message : 'SAVI could not record the deletion request.');
+    }
+  }
 
   return (
     <main className="savi-app-home min-h-screen bg-black text-white">
@@ -94,6 +113,18 @@ export default function SettingsPage() {
             </div>
           ) : null}
           {!isLoading && !state?.recentPurchases.length ? <p className="mt-5 text-white/60">No purchases are recorded for this account.</p> : null}
+        </div>
+        <div className="mt-6 border border-rose-200/15 bg-rose-200/[0.025] p-5 sm:p-6">
+          <p className="text-sm font-bold uppercase tracking-[0.2em] text-rose-200/75">Account</p>
+          <h2 className="mt-3 text-2xl font-black">Request account deletion</h2>
+          <p className="mt-4 max-w-2xl text-sm leading-6 text-white/60">Submit an authenticated deletion request. The operator will process it under the published account and billing policy; you will be signed out after the request is recorded.</p>
+          {deletionState === 'requested' ? <p className="mt-4 text-sm text-emerald-200">Your deletion request was recorded and you have been signed out.</p> : null}
+          {deletionError ? <p className="mt-4 text-sm text-rose-200">{deletionError}</p> : null}
+          {user && deletionState !== 'requested' ? (
+            <button type="button" onClick={() => void requestAccountDeletion()} disabled={deletionState === 'submitting'} className="mt-5 min-h-[44px] rounded-lg border border-rose-200/30 px-4 py-2 text-sm font-bold text-rose-100 transition hover:border-rose-200/60 disabled:cursor-not-allowed disabled:opacity-50">
+              {deletionState === 'submitting' ? 'Recording request...' : 'Request account deletion'}
+            </button>
+          ) : null}
         </div>
         <LegalLinks className="mt-12 border-t border-white/10 pt-6" />
       </section>

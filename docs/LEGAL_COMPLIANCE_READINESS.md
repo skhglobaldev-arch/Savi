@@ -11,7 +11,7 @@ Internal product-readiness record for the Phase 6C legal surfaces. This is not l
 - Browser local storage currently contains chat history, saved outputs, media-library references, and UI preferences. Session storage is used for short-lived request coordination.
 - Operational logging is structured and intentionally excludes prompts, raw files, cookies, tokens, provider keys, and raw IP addresses. Firestore is used for server-side rate-limit records only.
 - Stripe webhook handling is idempotent for payment events and credit grants. Refund/dispute events update purchase status and do not blindly subtract credits or force a negative account balance.
-- There is no implemented universal retention schedule, automated data-deletion job, self-serve account deletion endpoint, analytics stack, marketing-cookie stack, or durable legal-consent record.
+- There is no implemented universal retention schedule, automated data-erasure job, or analytics/marketing stack. An authenticated deletion-request endpoint and Settings control now record requests, and versioned Terms/Privacy acknowledgement records are written for authenticated sessions.
 
 ## Configuration required before launch
 
@@ -31,7 +31,7 @@ The legal pages display a visible placeholder warning until these values are com
 2. Define the account access, correction, export, deletion, objection, and restriction workflow, including identity verification and backup/provider handling.
 3. Confirm the minimum-age position and child-data process.
 4. Finalize refund eligibility, statutory cancellation wording, request windows, and the treatment of credits after a refund or dispute.
-5. Decide whether sign-in acknowledgement must be durably recorded, and if so, add a versioned consent record and migration plan.
+5. Confirm the legal scope and wording of the versioned sign-in acknowledgement, and add any separate subscription/refund acknowledgement required for paid checkout.
 6. Verify Google, Gemini, Firebase/Google Cloud, Firestore, Cloud SQL/Data Connect, and Stripe processing terms, subprocessor disclosures, regions, and UK/international-transfer safeguards.
 7. Obtain professional review of UK GDPR transparency, PECR, consumer subscription/digital-content terms, liability wording, governing law, and AI-related disclosures.
 

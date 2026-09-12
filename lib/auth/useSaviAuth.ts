@@ -34,6 +34,11 @@ export function useSaviAuth() {
     return () => window.removeEventListener(AUTH_CHANGED_EVENT, refresh);
   }, [refresh]);
 
+  useEffect(() => {
+    if (!user) return;
+    void fetch('/api/legal/consent', { method: 'POST' }).catch(() => undefined);
+  }, [user?.id]);
+
   const signIn = useCallback((returnTo = `${window.location.pathname}${window.location.search}`) => {
     window.location.assign(`/api/auth/google?returnTo=${encodeURIComponent(returnTo)}`);
   }, []);
