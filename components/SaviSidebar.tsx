@@ -6,7 +6,7 @@ import type { ToolMode } from './ToolModeSelector';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 import { LegalConsentNotice } from './LegalLinks';
 
-export type SidebarMode = ToolMode | 'All Media';
+export type SidebarMode = ToolMode | 'All Media' | 'All Tools';
 type SidebarActive = SidebarMode | 'Credits' | 'Settings' | 'Activity';
 
 type SidebarItem = {
@@ -38,6 +38,14 @@ const toolItems: SidebarItem[] = [
     href: '/workspace',
     active: 'Ask AI',
     icon: <SparkIcon />
+  },
+  {
+    label: 'All Tools',
+    hint: 'Browse every workspace',
+    mode: 'All Tools',
+    href: '/workspace?view=tools',
+    active: 'All Tools',
+    icon: <ToolBoxIcon />
   }
 ];
 
@@ -111,7 +119,9 @@ export function SaviSidebar({
       try {
         const value = window.localStorage.getItem(CHAT_SESSIONS_KEY);
         const parsed = value ? (JSON.parse(value) as SidebarChatSession[]) : [];
-        setChatSessions(Array.isArray(parsed) ? parsed.slice(0, 6) : []);
+        setChatSessions(Array.isArray(parsed)
+          ? parsed.filter((item) => item.title?.trim() && item.title !== 'New chat').slice(0, 6)
+          : []);
       } catch {
         setChatSessions([]);
       }
@@ -270,17 +280,6 @@ export function SaviSidebar({
     setProfileOpen(false);
   }
 
-  function requestNewChat() {
-    closeMobileMenu();
-    if (onOpenMode) {
-      window.history.replaceState(null, '', '/workspace');
-      window.dispatchEvent(new CustomEvent(CHAT_NEW_EVENT));
-      onOpenMode('Ask AI');
-      return;
-    }
-    window.location.href = '/workspace?newChat=1';
-  }
-
   function handleMobileModeClick(event: MouseEvent<HTMLAnchorElement>, mode?: SidebarMode) {
     handleModeClick(event, mode);
     if (mode) closeMobileMenu();
@@ -355,16 +354,6 @@ export function SaviSidebar({
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={requestNewChat}
-          title={collapsed ? 'New chat' : undefined}
-          className={`mt-5 flex min-h-[44px] w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-left text-[13px] font-semibold text-white transition hover:border-violet-300/35 hover:bg-white/[0.1] ${collapsed ? 'justify-center px-0' : ''}`}
-        >
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-violet-400/15 text-violet-100"><PlusIcon /></span>
-          <span className={collapsed ? 'hidden' : 'block'}>New chat</span>
-        </button>
-
         <div className="mt-4 w-full flex-1 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.22)_transparent]">
         <nav className="space-y-1.5">
           {toolItems.map((item) => (
@@ -411,7 +400,7 @@ export function SaviSidebar({
                       }}
                       className="min-h-[44px] min-w-0 flex-1 px-3 py-2.5"
                     >
-                      <span className="block truncate text-[13px] font-medium">{chat.title || 'New chat'}</span>
+                      <span className="block truncate text-[13px] font-medium">{chat.title || 'Conversation'}</span>
                       <span className="block truncate text-[11px] text-white/34">{new Date(chat.updatedAt).toLocaleDateString()}</span>
                     </Link>
                     <button
@@ -457,7 +446,7 @@ export function SaviSidebar({
 
         <div className="relative mt-2 w-full shrink-0">
           {profileOpen && (
-            <div className={`absolute bottom-[calc(100%+8px)] z-50 w-64 rounded-2xl border border-white/10 bg-[#181B22]/98 p-2 shadow-[0_18px_48px_rgba(0,0,0,0.3)] backdrop-blur-2xl ${collapsed ? 'left-full ml-3' : 'left-0 right-0'}`}>
+            <div className={`absolute bottom-[calc(100%+8px)] z-50 w-64 rounded-2xl border border-white/[0.16] bg-[#0d1016]/[0.99] p-2 shadow-[0_22px_64px_rgba(0,0,0,0.5)] backdrop-blur-xl ${collapsed ? 'left-full ml-3' : 'left-0 right-0'}`}>
               {renderAccountMenu()}
             </div>
           )}
@@ -521,12 +510,7 @@ export function SaviSidebar({
               </button>
             </div>
 
-            <button type="button" onClick={requestNewChat} className="mt-6 flex min-h-[44px] items-center gap-3 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-left text-[13px] font-semibold text-white hover:bg-white/[0.1]">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-violet-400/15 text-violet-100"><PlusIcon /></span>
-              New chat
-            </button>
-
-            <nav className="mt-3 space-y-1">
+            <nav className="mt-6 space-y-1">
               {toolItems.map((item) => (
                 <SidebarLink key={item.label} item={item} active={active === item.active} onClick={(event) => handleMobileModeClick(event, item.mode)} />
               ))}
@@ -570,7 +554,7 @@ export function SaviSidebar({
                 </span>
                 <ChevronDownIcon />
               </button>
-              {profileOpen && <div id="savi-mobile-account-menu" className="mt-2 rounded-xl border border-white/10 bg-[#181B22] p-2">{renderAccountMenu()}</div>}
+              {profileOpen && <div id="savi-mobile-account-menu" className="mt-2 rounded-xl border border-white/[0.16] bg-[#0d1016] p-2 shadow-[0_18px_50px_rgba(0,0,0,0.42)]">{renderAccountMenu()}</div>}
             </div>
           </aside>
         </div>
@@ -675,8 +659,8 @@ function FileIcon() {
   return <IconShell><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v5h5" /><path d="M9 13h6" /><path d="M9 17h4" /></IconShell>;
 }
 
-function PlusIcon() {
-  return <IconShell><path d="M12 5v14" /><path d="M5 12h14" /></IconShell>;
+function ToolBoxIcon() {
+  return <IconShell><path d="M4 8.5h16v10H4z" /><path d="M8 8.5v-2a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M4 12.5h16M10 12.5v2h4v-2" /></IconShell>;
 }
 
 function ChevronLeftIcon() {

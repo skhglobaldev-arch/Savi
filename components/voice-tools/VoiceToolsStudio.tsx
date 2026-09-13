@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ToolPreview } from '@/components/ToolPreview';
 import { ToolActionBar, ToolFieldLabel, ToolHeader, ToolStatus } from '@/components/SaviToolUI';
+import { ToolVoiceIcon } from '@/components/SaviIcons';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
@@ -50,6 +51,11 @@ const radioLengths: Array<{ id: RadioLengthId; label: string; target: string }> 
   { id: 'short', label: 'Short', target: '45 to 60 seconds' },
   { id: 'standard', label: 'Standard', target: '1 to 2 minutes' },
   { id: 'long', label: 'Long', target: '3 to 4 minutes' }
+];
+
+export const voiceToolOptions = [
+  { id: 'tts' as const, label: 'Text to Speech', note: 'Read exact text with a chosen voice', previewId: 'voice_tts' },
+  { id: 'radio' as const, label: 'Radio Talk AI', note: 'Turn a topic into a hosted segment', previewId: 'voice_radio' }
 ];
 
 const CLOSE_ACTIVE_TOOL_EVENT = 'savi-close-active-tool';
@@ -246,7 +252,7 @@ export function VoiceToolsStudio({
   return (
     <section className="savi-tool-shell">
       <ToolHeader
-        mark="A"
+        mark={<ToolVoiceIcon />}
         eyebrow={isToolOpen ? 'Voice tool' : 'Voice tools'}
         title={isToolOpen ? (mode === 'radio' ? 'Radio Talk AI' : 'Text to Speech') : 'Voice tools'}
         description={isToolOpen
@@ -258,10 +264,7 @@ export function VoiceToolsStudio({
 
       {!isToolOpen && (
       <div className="grid gap-2 border-b border-white/10 bg-white/[0.02] p-5 md:grid-cols-2 md:p-6">
-        {[
-          { id: 'tts' as const, label: 'Text to Speech', note: 'Read exact text with a chosen voice', previewId: 'voice_tts' },
-          { id: 'radio' as const, label: 'Radio Talk AI', note: 'Turn a topic into a hosted segment', previewId: 'voice_radio' }
-        ].map((item) => (
+        {voiceToolOptions.map((item) => (
           <button
             key={item.id}
             type="button"

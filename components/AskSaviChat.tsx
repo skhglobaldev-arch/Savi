@@ -547,18 +547,13 @@ function getTextDirection(text: string): 'rtl' | 'ltr' {
 function createChatTitle(messages: ChatMessage[]) {
   const firstUserMessage = messages.find((message) => message.role === 'user')?.content.trim();
   if (!firstUserMessage) return 'New chat';
-  return firstUserMessage.replace(/\s+/g, ' ').slice(0, 42);
+  const normalized = firstUserMessage.replace(/\s+/g, ' ').replace(/[.!?]+$/, '');
+  const topic = normalized.replace(/^(please|can you|could you|help me|i need|i want to)\s+/i, '');
+  return topic.slice(0, 42).trim() || 'Conversation';
 }
 
-function createEmptySession(): ChatSession {
-  const now = Date.now();
-  return {
-    id: makeId(),
-    title: 'New chat',
-    createdAt: now,
-    updatedAt: now,
-    messages: []
-  };
+function hasRealUserMessage(message: ChatMessage) {
+  return message.role === 'user' && Boolean(message.content.trim() || message.attachments?.length);
 }
 
 function loadStoredSessions(): ChatSession[] {
@@ -569,15 +564,22 @@ function loadStoredSessions(): ChatSession[] {
     if (value) {
       const parsed = JSON.parse(value) as ChatSession[];
       if (Array.isArray(parsed)) {
-        return parsed.map((session) => ({
-          ...session,
-          messages: session.messages.map(stripLegacyClientQuote)
-        }));
+        const storedSessions = parsed
+          .filter((session) => Array.isArray(session.messages) && session.messages.some(hasRealUserMessage))
+          .map((session) => {
+            const messages = session.messages.map(stripLegacyClientQuote);
+            return {
+              ...session,
+              title: createChatTitle(messages),
+              messages
+            };
+          });
+        if (storedSessions.length) return storedSessions;
       }
     }
 
     const oldMessages = loadStoredMessages();
-    if (oldMessages.length) {
+    if (oldMessages.some(hasRealUserMessage)) {
       const now = Date.now();
       return [{
         id: makeId(),
@@ -606,10 +608,9 @@ function loadInitialChatState() {
     };
   }
 
-  const empty = createEmptySession();
   return {
-    sessions: [empty],
-    activeChatId: empty.id,
+    sessions: [],
+    activeChatId: '',
     messages: []
   };
 }
@@ -884,7 +885,8 @@ export function AskSaviChat({
   template,
   templateLaunchKey = 0,
   initialMessage = '',
-  initialMessageLaunchKey = 0
+  initialMessageLaunchKey = 0,
+  newChatLaunchKey = 0
 }: {
   credits: number | null;
   onCreditsChange: (credits: number) => void;
@@ -893,6 +895,7 @@ export function AskSaviChat({
   templateLaunchKey?: number;
   initialMessage?: string;
   initialMessageLaunchKey?: number;
+  newChatLaunchKey?: number;
 }) {
   const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
   // Storage is browser-only. Hydrating it after the first render prevents a
@@ -922,6 +925,7 @@ export function AskSaviChat({
     file: []
   });
   const handledInitialMessageKey = useRef(0);
+  const handledNewChatKey = useRef(0);
   const handledRouteChat = useRef(false);
 
   const visibleMessages = useMemo(() => {
@@ -948,6 +952,10 @@ export function AskSaviChat({
 
   useEffect(() => {
     if (!chatHydrated || typeof window === 'undefined') return;
+    if (!activeChatId) {
+      setMessages([]);
+      return;
+    }
     const activeSession = chatSessions.find((session) => session.id === activeChatId);
     if (!activeSession) return;
     setMessages(activeSession.messages.slice(-MAX_MEMORY_MESSAGES));
@@ -958,7 +966,29 @@ export function AskSaviChat({
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!chatHydrated || typeof window === 'undefined') return;
+    const hasRealMessages = messages.some(hasRealUserMessage);
+
+    if (!activeChatId) {
+      if (!hasRealMessages) {
+        window.localStorage.removeItem(CHAT_STORAGE_KEY);
+        return;
+      }
+
+      const now = Date.now();
+      const session: ChatSession = {
+        id: makeId(),
+        title: createChatTitle(messages),
+        createdAt: messages[0]?.createdAt || now,
+        updatedAt: now,
+        messages: messages.slice(-MAX_MEMORY_MESSAGES)
+      };
+      setChatSessions((current) => [session, ...current]);
+      setActiveChatId(session.id);
+      window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(session.messages));
+      return;
+    }
+
     setChatSessions((current) => {
       const now = Date.now();
       const next = current.map((session) =>
@@ -973,13 +1003,16 @@ export function AskSaviChat({
       );
       return next.sort((a, b) => b.updatedAt - a.updatedAt);
     });
-    window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages.slice(-MAX_MEMORY_MESSAGES)));
+    if (hasRealMessages) {
+      window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages.slice(-MAX_MEMORY_MESSAGES)));
+    }
   }, [activeChatId, chatHydrated, messages]);
 
   useEffect(() => {
     if (!chatHydrated || typeof window === 'undefined') return;
     window.localStorage.setItem(CHAT_SESSIONS_KEY, JSON.stringify(chatSessions.slice(0, 40)));
-    window.localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId);
+    if (activeChatId) window.localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId);
+    else window.localStorage.removeItem(ACTIVE_CHAT_KEY);
     window.dispatchEvent(new CustomEvent(CHAT_SESSIONS_EVENT));
   }, [activeChatId, chatHydrated, chatSessions]);
 
@@ -999,9 +1032,8 @@ export function AskSaviChat({
       const chatId = (event as CustomEvent<{ chatId?: string }>).detail?.chatId;
       const nextSessions = loadStoredSessions();
       if (!nextSessions.length) {
-        const empty = createEmptySession();
-        setChatSessions([empty]);
-        setActiveChatId(empty.id);
+        setChatSessions([]);
+        setActiveChatId('');
         setMessages([]);
         return;
       }
@@ -1061,10 +1093,14 @@ export function AskSaviChat({
     void submitText(initialMessage);
   }, [chatHydrated, initialMessage, initialMessageLaunchKey]);
 
+  useEffect(() => {
+    if (!chatHydrated || newChatLaunchKey === 0 || handledNewChatKey.current === newChatLaunchKey) return;
+    handledNewChatKey.current = newChatLaunchKey;
+    createNewChat();
+  }, [chatHydrated, newChatLaunchKey]);
+
   function createNewChat() {
-    const session = createEmptySession();
-    setChatSessions((current) => [session, ...current]);
-    setActiveChatId(session.id);
+    setActiveChatId('');
     setMessages([]);
     setDraftTemplate(undefined);
     setToolDraft(undefined);
@@ -2162,7 +2198,7 @@ export function AskSaviChat({
                         One workspace for conversation, images, video, voice, files, and the work you create along the way.
                       </p>
                       <div className="mx-auto mt-5 flex max-w-2xl flex-wrap justify-center gap-2">
-                        {(['Images', 'Video', 'Voice', 'Files', 'All Media'] as SidebarMode[]).map((mode) => (
+                        {(['All Tools', 'Images', 'Video', 'Voice', 'Files', 'All Media'] as SidebarMode[]).map((mode) => (
                           <button
                             key={mode}
                             type="button"

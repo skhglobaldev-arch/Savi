@@ -16,6 +16,8 @@ export default function HomePage() {
     const url = new URL('/workspace', window.location.origin);
     if (mode === 'All Media') {
       url.searchParams.set('view', 'media');
+    } else if (mode === 'All Tools') {
+      url.searchParams.set('view', 'tools');
     } else if (mode !== 'Ask AI') {
       url.searchParams.set('tool', mode);
     }

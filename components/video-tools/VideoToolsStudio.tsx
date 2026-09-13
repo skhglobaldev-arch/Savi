@@ -5,6 +5,7 @@ import { OutputGallery, type OutputGalleryItem } from '@/components/OutputGaller
 import { ToolSelect } from '@/components/ToolSelect';
 import { ToolPreview } from '@/components/ToolPreview';
 import { ToolActionBar, ToolCategoryTabs, ToolFieldLabel, ToolHeader, ToolResultEmpty, ToolStatus } from '@/components/SaviToolUI';
+import { ToolVideoIcon } from '@/components/SaviIcons';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
@@ -38,7 +39,7 @@ type VideoStudioOutput = OutputGalleryItem & {
 
 const CLOSE_ACTIVE_TOOL_EVENT = 'savi-close-active-tool';
 
-const videoTools: Array<{
+export const videoTools: Array<{
   id: VideoToolId;
   title: string;
   description: string;
@@ -834,7 +835,7 @@ export function VideoToolsStudio({
   return (
     <section className="savi-tool-shell">
       <ToolHeader
-        mark="V"
+        mark={<ToolVideoIcon />}
         eyebrow={isToolOpen ? 'Video tool' : 'Video tools'}
         title={isToolOpen ? selectedTool.title : 'Video tools'}
         description={isToolOpen ? selectedTool.description : 'Create text-to-video, image-to-video, social reels, product ads, and frame-guided clips.'}

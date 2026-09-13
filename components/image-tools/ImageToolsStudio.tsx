@@ -5,6 +5,7 @@ import { OutputGallery, type OutputGalleryItem } from '@/components/OutputGaller
 import { ToolSelect } from '@/components/ToolSelect';
 import { ToolPreview } from '@/components/ToolPreview';
 import { ToolActionBar, ToolCategoryTabs, ToolFieldLabel, ToolHeader, ToolResultEmpty, ToolStatus } from '@/components/SaviToolUI';
+import { ToolImageIcon } from '@/components/SaviIcons';
 import { SketchCanvas, type SketchCanvasHandle, type SketchCanvasTool } from '@/components/image-tools/SketchCanvas';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
@@ -91,7 +92,7 @@ type PendingTextToImageRequest = {
 
 const CLOSE_ACTIVE_TOOL_EVENT = 'savi-close-active-tool';
 
-const imageTools: Array<{
+export const imageTools: Array<{
   id: ImageToolId;
   title: string;
   description: string;
@@ -2134,7 +2135,7 @@ export function ImageToolsStudio({
   return (
     <section className="savi-tool-shell">
       <ToolHeader
-        mark="I"
+        mark={<ToolImageIcon />}
         eyebrow={isToolOpen ? 'Image tool' : 'Image tools'}
         title={isToolOpen ? selectedTool.title : 'Image tools'}
         description={isToolOpen ? selectedTool.description : 'Generate, edit, remove, restyle, and create product-ready images with clear tool choices.'}

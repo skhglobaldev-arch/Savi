@@ -2,12 +2,12 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'SAVI by SKH.GLOBAL',
+  title: 'SAVI',
   description: 'Smart Assistant for Valuable Ideas. Ask. Create. Organise.',
   icons: {
-    icon: '/brand/savi-logo.png',
-    shortcut: '/brand/savi-logo.png',
-    apple: '/brand/savi-logo.png'
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg'
   }
 };
 

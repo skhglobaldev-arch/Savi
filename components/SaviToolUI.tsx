@@ -16,7 +16,7 @@ export function ToolHeader({
   eyebrow: string;
   title: string;
   description: string;
-  mark: string;
+  mark: ReactNode;
   children?: ReactNode;
 }) {
   return (

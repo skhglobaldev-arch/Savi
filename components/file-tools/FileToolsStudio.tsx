@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { ToolPreview } from '@/components/ToolPreview';
 import { ToolActionBar, ToolCategoryTabs, ToolFieldLabel, ToolHeader, ToolResultEmpty, ToolStatus } from '@/components/SaviToolUI';
+import { ToolFileIcon } from '@/components/SaviIcons';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
@@ -50,7 +51,7 @@ type PageItem = {
   selected: boolean;
 };
 
-const tools: Array<{
+export const fileTools: Array<{
   id: FileToolId;
   title: string;
   description: string;
@@ -293,8 +294,8 @@ export function FileToolsStudio({
   const [podcastQuote, setPodcastQuote] = useState<number | null>(null);
   const workAreaRef = useRef<HTMLDivElement | null>(null);
 
-  const selectedTool = tools.find((tool) => tool.id === activeTool) ?? tools[0];
-  const visibleTools = tools.filter((tool) => tool.group === toolGroup);
+  const selectedTool = fileTools.find((tool) => tool.id === activeTool) ?? fileTools[0];
+  const visibleTools = fileTools.filter((tool) => tool.group === toolGroup);
   const selectedJpgPages = useMemo(() => jpgPages.filter((page) => page.selected), [jpgPages]);
   const selectedOrganizePages = useMemo(() => pageItems.filter((page) => page.selected), [pageItems]);
   const isBusy = Boolean(busyLabel);
@@ -412,7 +413,7 @@ export function FileToolsStudio({
 
   function selectFileTool(nextTool: FileToolId, nextPrompt = '') {
     setActiveTool(nextTool);
-    setToolGroup(tools.find((tool) => tool.id === nextTool)?.group ?? 'PDF tools');
+    setToolGroup(fileTools.find((tool) => tool.id === nextTool)?.group ?? 'PDF tools');
     setIsToolOpen(true);
     clearFileInputs();
     setAiPrompt(nextPrompt);
@@ -1178,7 +1179,7 @@ export function FileToolsStudio({
   return (
     <section className="savi-tool-shell">
       <ToolHeader
-        mark="F"
+        mark={<ToolFileIcon />}
         eyebrow={isToolOpen ? 'File tool' : 'File tools'}
         title={isToolOpen ? selectedTool.title : 'File tools'}
         description={isToolOpen ? selectedTool.description : 'Upload, preview, reorder, select, export, and download without leaving SAVI.'}
@@ -1190,7 +1191,7 @@ export function FileToolsStudio({
             options={(['PDF tools', 'AI document'] as const).map((group) => ({
               id: group,
               label: group,
-              count: tools.filter((tool) => tool.group === group).length
+              count: fileTools.filter((tool) => tool.group === group).length
             }))}
           />
         )}
