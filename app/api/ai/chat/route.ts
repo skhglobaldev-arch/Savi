@@ -4,6 +4,7 @@ import { GeminiUnavailableError, requestGeminiWithFallback } from '@/lib/ai/gemi
 import { getConfiguredTextModel, getConfiguredTextModels } from '@/lib/pricing/saviPricing';
 import { logOperational } from '@/lib/observability/logger';
 import { getSaviFairUseConfig } from '@/lib/savi/fairUse';
+import { createSaviUnexpectedErrorResponse } from '@/lib/savi/backendSecurity';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 import { recordFreeAiUsage } from '@/lib/savi/protectedOperations';
@@ -244,6 +245,7 @@ export async function POST(request: NextRequest) {
     if (!text) return NextResponse.json({ response: createContinuityAnswer(message), mode: 'continuity' });
     return NextResponse.json({ response: text, mode: resolvedModel });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Chat request failed.' }, { status: 500 });
+    logOperational('error', 'savi_ai_chat_unexpected_error');
+    return NextResponse.json(createSaviUnexpectedErrorResponse(), { status: 500 });
   }
 }

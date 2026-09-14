@@ -3,6 +3,7 @@ import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import { GeminiUnavailableError, requestGeminiWithFallback } from '@/lib/ai/geminiResilience';
 import { getConfiguredTextModels } from '@/lib/pricing/saviPricing';
 import { logOperational } from '@/lib/observability/logger';
+import { isUnavailablePdfAction } from '@/lib/savi/backendSecurity';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 import { recordFreeAiUsage } from '@/lib/savi/protectedOperations';
@@ -115,7 +116,8 @@ function safeAttachments(value: unknown): SaviAgentAttachment[] {
 }
 
 function normalizePlan(raw: RawAgentPlan, message: string): SaviAgentPlan {
-  const tool = getSaviAgentTool(isSaviAgentToolId(raw.toolId) ? raw.toolId : 'chat');
+  const unavailablePdf = isUnavailablePdfAction(raw.toolId);
+  const tool = getSaviAgentTool(unavailablePdf ? 'chat' : isSaviAgentToolId(raw.toolId) ? raw.toolId : 'chat');
   const intent = raw.intent === 'tool' || raw.intent === 'question' ? raw.intent : 'chat';
   const language = raw.language === 'fa' ? 'fa' : isPersianOrFinglish(message) ? 'fa' : 'en';
   const missingInput = ['none', 'text', 'image', 'pdf', 'video', 'audio'].includes(raw.missingInput || '')
@@ -125,14 +127,18 @@ function normalizePlan(raw: RawAgentPlan, message: string): SaviAgentPlan {
   const pageB = Number(raw.pageB);
 
   return {
-    intent,
-    reply: typeof raw.reply === 'string' && raw.reply.trim() ? raw.reply.trim().slice(0, 1400) : language === 'fa' ? 'متوجه شدم. بگذار بهترین مسیر را آماده کنم.' : 'Got it. I will prepare the best next step.',
+    intent: unavailablePdf ? 'question' : intent,
+    reply: unavailablePdf
+      ? language === 'fa'
+        ? 'این ابزار PDF فعلاً در دسترس نیست. می‌توانی از ادغام، مرتب‌سازی یا تبدیل PDF به JPG استفاده کنی.'
+        : 'That PDF tool is temporarily unavailable. You can use Merge PDF, Organize PDF, or PDF to JPG instead.'
+      : typeof raw.reply === 'string' && raw.reply.trim() ? raw.reply.trim().slice(0, 1400) : language === 'fa' ? 'متوجه شدم. بگذار بهترین مسیر را آماده کنم.' : 'Got it. I will prepare the best next step.',
     language,
     toolId: tool.id,
     prompt: typeof raw.prompt === 'string' && raw.prompt.trim() ? raw.prompt.trim().slice(0, MAX_MESSAGE_LENGTH) : message,
-    missingInput,
+    missingInput: unavailablePdf ? 'none' : missingInput,
     quickReplies: Array.isArray(raw.quickReplies) ? raw.quickReplies.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).slice(0, 4) : [],
-    nextToolId: isSaviAgentToolId(raw.nextToolId) ? raw.nextToolId : undefined,
+    nextToolId: isSaviAgentToolId(raw.nextToolId) && !isUnavailablePdfAction(raw.nextToolId) ? raw.nextToolId : undefined,
     pageA: Number.isInteger(pageA) && pageA > 0 ? pageA : undefined,
     pageB: Number.isInteger(pageB) && pageB > 0 && pageB !== pageA ? pageB : undefined,
     voice: typeof raw.voice === 'string' ? raw.voice.slice(0, 60) : undefined,
@@ -193,14 +199,12 @@ function localPlan(message: string, attachments: SaviAgentAttachment[] = []): Sa
 
   if (has(/\b(extract.*images?|images?.*extract)\b|استخراج.*عکس|خارج.*عکس/i)) {
     return {
-      intent: hasPdf ? 'tool' : 'question',
-      reply: hasPdf
-        ? reply('تصاویر embedded در PDF موجود را در یک ZIP جمع می‌کنم.', 'I will extract the embedded images from the attached PDF into a ZIP.')
-        : reply('PDF را همین‌جا اضافه کن تا تصاویر embedded آن را استخراج کنم.', 'Attach the PDF here and I will extract its embedded images.'),
+      intent: 'question',
+      reply: reply('این ابزار PDF فعلاً در دسترس نیست. می‌توانی از ادغام، مرتب‌سازی یا تبدیل PDF به JPG استفاده کنی.', 'That PDF tool is temporarily unavailable. You can use Merge PDF, Organize PDF, or PDF to JPG instead.'),
       language,
-      toolId: 'extract_images',
+      toolId: 'chat',
       prompt: message,
-      missingInput: hasPdf ? 'none' : 'pdf',
+      missingInput: 'none',
       quickReplies: []
     };
   }

@@ -3,6 +3,8 @@ import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import { getSaviDataConnect } from '@/lib/firebase/admin';
 import { canWithdrawAccountDeletion } from '@/lib/legal/erasureProcessor';
 import { findExistingSaviDatabaseUser } from '@/lib/savi/textToImageInfrastructure';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 
 export const runtime = 'nodejs';
 
@@ -19,6 +21,11 @@ async function findRequest(userId: string) {
 export async function POST(request: NextRequest) {
   const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
   if (!session) return NextResponse.json({ error: 'Please sign in before withdrawing account deletion.' }, { status: 401 });
+  const rateLimit = await checkSaviRateLimit({
+    rateLimitClass: 'ACCOUNT_LEGAL',
+    identity: getSaviRequestIdentity(request, session.id)
+  });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   try {
     const databaseUser = await findExistingSaviDatabaseUser(session);

@@ -3,12 +3,19 @@ import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import { recordCurrentLegalConsent } from '@/lib/legal/consent';
 import { resolveSaviDatabaseUser } from '@/lib/savi/textToImageInfrastructure';
 import { logOperational } from '@/lib/observability/logger';
+import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
+import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
   if (!session) return NextResponse.json({ error: 'Please sign in before recording legal consent.' }, { status: 401 });
+  const rateLimit = await checkSaviRateLimit({
+    rateLimitClass: 'ACCOUNT_LEGAL',
+    identity: getSaviRequestIdentity(request, session.id)
+  });
+  if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   try {
     const databaseUser = await resolveSaviDatabaseUser(session);

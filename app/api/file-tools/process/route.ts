@@ -1,33 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument } from 'pdf-lib';
-import JSZip from 'jszip';
-import path from 'node:path';
-import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import {
   SAVI_LOCAL_PDF_MODEL,
   SAVI_LOCAL_PDF_PROVIDER,
-  SAVI_LOCAL_PDF_TOOL_IDS,
   SAVI_ILOVEPDF_PDF_TO_JPG_MODEL,
   SAVI_ILOVEPDF_PROVIDER
 } from '@/lib/pricing/saviPricing';
+import {
+  isUnavailablePdfAction,
+  SAVI_UNAVAILABLE_PDF_TOOL_RESPONSE
+} from '@/lib/savi/backendSecurity';
 import { runProtectedOperation } from '@/lib/savi/protectedOperations';
 import { SaviInfrastructureError } from '@/lib/savi/textToImageInfrastructure';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
-import {
-  parsePageRange,
-  runCommand,
-  sanitizeFileName,
-  withTempDir,
-  writeFormFile
-} from '@/lib/pdf/serverTools';
+import { parsePageRange } from '@/lib/pdf/serverTools';
 import { createPagePlanPdf, mergePdfFiles, type LocalPdfOutput, PdfProcessingInputError } from '@/lib/pdf/localOperations';
 import { convertPdfToJpg, mapIlovePdfError } from '@/lib/pdf/ilovePdfServer';
 
 export const runtime = 'nodejs';
 
-type PdfAction = 'merge_pdf' | 'organize_pdf' | 'split_pdf' | 'pdf_to_jpg' | 'extract_images';
+type PdfAction = 'merge_pdf' | 'organize_pdf' | 'split_pdf' | 'pdf_to_jpg';
 type PagePlanItem = { pageNumber: number; rotation?: number };
 type PdfOutput = LocalPdfOutput | {
   bytes: Buffer;
@@ -43,12 +37,13 @@ const MAX_FILES = 12;
 const MAX_PAGES_PER_FILE = 250;
 const MAX_TOTAL_PAGES = 500;
 const MAX_JPG_OUTPUT_PAGES = 100;
-const MAX_EXTRACTED_IMAGES = 200;
 
 const PdfInputError = PdfProcessingInputError;
 
+const ACTIVE_PDF_ACTIONS: readonly PdfAction[] = ['merge_pdf', 'organize_pdf', 'split_pdf', 'pdf_to_jpg'];
+
 function isPdfAction(value: string | undefined): value is PdfAction {
-  return Boolean(value && SAVI_LOCAL_PDF_TOOL_IDS.includes(value as (typeof SAVI_LOCAL_PDF_TOOL_IDS)[number]));
+  return Boolean(value && ACTIVE_PDF_ACTIONS.includes(value as PdfAction));
 }
 
 function isPdfFile(value: FormDataEntryValue): value is File {
@@ -135,31 +130,6 @@ async function createJpgZip(file: File, pageRange: string | null): Promise<PdfOu
   }
 }
 
-async function createExtractedImagesZip(file: File): Promise<PdfOutput> {
-  return withTempDir('savi-pdf-images-', async (dir) => {
-    const inputPath = path.join(dir, `${sanitizeFileName(file.name)}.pdf`);
-    await writeFormFile(file, inputPath);
-    const prefix = path.join(dir, 'extracted-image');
-    await runCommand('pdfimages', ['-j', inputPath, prefix]);
-    const imageFiles = (await readdir(dir))
-      .filter((name) => name.startsWith('extracted-image-'))
-      .filter((name) => /\.(jpg|jpeg|png|ppm|pbm)$/i.test(name))
-      .sort();
-    if (!imageFiles.length) throw new PdfInputError('No embedded images were found in this PDF.', 422);
-    if (imageFiles.length > MAX_EXTRACTED_IMAGES) {
-      throw new PdfInputError(`This PDF contains too many embedded images. Extract up to ${MAX_EXTRACTED_IMAGES} images at a time.`);
-    }
-    const zip = new JSZip();
-    for (let index = 0; index < imageFiles.length; index += 1) {
-      const name = imageFiles[index];
-      const extension = path.extname(name).replace('.', '') || 'jpg';
-      zip.file(`savi-extracted-image-${String(index + 1).padStart(3, '0')}.${extension}`, await readFile(path.join(dir, name)));
-    }
-    const bytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-    return { bytes, filename: `${sanitizeFileName(file.name)}-images.zip`, mimeType: 'application/zip', mediaType: 'archive' };
-  });
-}
-
 async function processPdf(action: PdfAction, files: File[], form: FormData): Promise<PdfOutput> {
   if (action === 'merge_pdf') {
     if (files.length < 2) throw new PdfInputError('Upload at least two PDFs to merge.');
@@ -182,7 +152,7 @@ async function processPdf(action: PdfAction, files: File[], form: FormData): Pro
     return createPagePlanPdf(file, pagePlan, action === 'split_pdf' ? 'split' : 'organize');
   }
   if (action === 'pdf_to_jpg') return createJpgZip(file, typeof form.get('pages') === 'string' ? String(form.get('pages')) : 'all');
-  return createExtractedImagesZip(file);
+  throw new PdfInputError('Choose a valid PDF tool.');
 }
 
 export async function POST(request: NextRequest) {
@@ -194,8 +164,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const form = await request.formData();
-    const action = typeof form.get('action') === 'string' ? String(form.get('action')) : undefined;
-    if (!isPdfAction(action)) throw new PdfInputError('Choose a valid PDF tool.');
+    const actionValue = typeof form.get('action') === 'string' ? String(form.get('action')) : undefined;
+    if (isUnavailablePdfAction(actionValue)) {
+      return NextResponse.json(SAVI_UNAVAILABLE_PDF_TOOL_RESPONSE, { status: 503 });
+    }
+    if (!isPdfAction(actionValue)) throw new PdfInputError('Choose a valid PDF tool.');
+    const action = actionValue;
     const submittedFiles = form.getAll('files');
     if (submittedFiles.some((file) => !isPdfFile(file))) {
       throw new PdfInputError('Use PDF files only.');
@@ -212,7 +186,7 @@ export async function POST(request: NextRequest) {
       operation: 'document_local',
       pricingInput: { pageCount },
       pricingOutput: {},
-      mediaType: action === 'pdf_to_jpg' || action === 'extract_images' ? 'archive' : 'document',
+      mediaType: action === 'pdf_to_jpg' ? 'archive' : 'document',
       generate: async () => {
         const output = await processPdf(action, files, form);
         return { ...output, metadata: { pageCount, processing: action === 'pdf_to_jpg' ? 'ilovepdf_eu' : 'local_pdf' } };

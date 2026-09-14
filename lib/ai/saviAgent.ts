@@ -127,7 +127,8 @@ export const SAVI_AGENT_TOOLS: Record<SaviAgentToolId, SaviAgentTool> = {
   presentation_script: makeTool('presentation_script', 'Presentation Script', 'text', 'text', 'Turn notes into a clear presentation script.', 'text')
 };
 
-export const SAVI_AGENT_TOOL_IDS = Object.keys(SAVI_AGENT_TOOLS) as SaviAgentToolId[];
+export const SAVI_AGENT_TOOL_IDS = Object.keys(SAVI_AGENT_TOOLS)
+  .filter((toolId) => toolId !== 'extract_images') as SaviAgentToolId[];
 
 export function getSaviAgentTool(toolId: string | undefined): SaviAgentTool {
   if (toolId && toolId in SAVI_AGENT_TOOLS) return SAVI_AGENT_TOOLS[toolId as SaviAgentToolId];
@@ -139,12 +140,14 @@ export function isSaviAgentToolId(value: unknown): value is SaviAgentToolId {
 }
 
 export function serializeSaviAgentTools() {
-  return Object.values(SAVI_AGENT_TOOLS).map((tool) => ({
+  return Object.values(SAVI_AGENT_TOOLS)
+    .filter((tool) => tool.id !== 'extract_images')
+    .map((tool) => ({
     id: tool.id,
     title: tool.title,
     category: tool.category,
     requiredInput: tool.requiredInput,
     description: tool.description,
     output: tool.output
-  }));
+    }));
 }

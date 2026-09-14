@@ -16,6 +16,7 @@ import {
   SaviInfrastructureError,
   type GeneratedImageOutput
 } from '@/lib/savi/textToImageInfrastructure';
+import { createSaviUnexpectedErrorResponse } from '@/lib/savi/backendSecurity';
 import { runProtectedOperation, type SaviProtectedOutput } from '@/lib/savi/protectedOperations';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
@@ -435,9 +436,6 @@ export async function POST(request: NextRequest) {
     if (error instanceof ImageGenerationProviderError) {
       return NextResponse.json({ error: 'Image generation is temporarily unavailable. Please try again.', category: 'PROVIDER_ERROR' }, { status: error.status });
     }
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Image generation failed.' },
-      { status: 500 }
-    );
+    return NextResponse.json(createSaviUnexpectedErrorResponse(), { status: 500 });
   }
 }
