@@ -58,3 +58,7 @@ export function subscriptionGrantKey(input: SubscriptionGrantKeyInput) {
 export function shouldGrantSubscriptionCredits(invoiceStatus: string | null | undefined, paid: boolean | null | undefined) {
   return invoiceStatus === 'paid' || paid === true;
 }
+
+export function canReceiveRecurringSubscriptionGrant(status: string, providerStatus: string) {
+  return ['active', 'trialing'].includes(status) && ['active', 'trialing'].includes(providerStatus);
+}

@@ -17,6 +17,7 @@ import {
   type SaviFailureCategory
 } from '@/lib/savi/textToImageInfrastructure';
 import { logOperational } from '@/lib/observability/logger';
+import { assertReservationAmounts } from '@/lib/savi/creditIntegrity';
 
 const CLIENT_REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const UUID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9a-f]{32})$/i;
@@ -346,6 +347,7 @@ async function reserve(input: {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const account = await getAuthoritativeCreditAccountByUserId(input.userId);
     reservation.subscriptionCredits = Math.min(account.subscriptionCredits, reservation.credits);
+    assertReservationAmounts(reservation.credits, reservation.subscriptionCredits);
 
     try {
       await dataConnectMutation('ReserveGenerationJob', {
@@ -399,6 +401,7 @@ async function finalize(input: {
   pricingInput: SaviProtectedOperationRequest['pricingInput'];
   pricingOutput: SaviProtectedOperationRequest['pricingOutput'];
 }) {
+  assertReservationAmounts(input.reservation.credits, input.reservation.subscriptionCredits);
   const imageCount = input.output.usage?.imageCount ?? input.pricingOutput?.imageCount ?? 0;
   const resolution = input.pricingOutput?.resolution ?? null;
   const duration = input.output.usage?.videoSeconds
@@ -472,6 +475,7 @@ async function release(input: {
   failure: SaviInfrastructureError;
   output?: SaviProtectedOutput;
 }) {
+  assertReservationAmounts(input.reservation.credits, input.reservation.subscriptionCredits);
   const job = await getJob(input.userId, input.reservation.jobId).catch(() => null);
   if (!job || job.status !== 'processing') return;
 
@@ -510,6 +514,20 @@ async function release(input: {
       })
     });
   } catch {
+    await dataConnectMutation('MarkGenerationJobForReconciliation', {
+      jobId: input.reservation.jobId,
+      reservationId: input.reservation.reservationId,
+      userId: input.userId,
+      failureCategory: input.failure.category,
+      failureMessage: 'Normal credit-release settlement failed and requires maintenance reconciliation.',
+      providerRequestId: input.output?.providerRequestId || input.failure.providerRequestId || null,
+      metadata: metadata({
+        source: 'protected_operation_release_failure',
+        toolId: input.toolId,
+        provider: input.provider,
+        failureCategory: input.failure.category
+      })
+    }).catch(() => undefined);
     logOperational('error', 'credit_reservation_release_failed', {
       toolId: input.toolId,
       provider: input.provider,

@@ -407,7 +407,7 @@ mutation CreateSaviUserAndAccountWithWelcomeGrant(
   $email: String!
   $displayName: String!
   $avatarUrl: String
-  $welcomeCredits: Int!
+  $welcomeCredits: Int @retired(reason: "Welcome grants are locked at 300 credits.")
   $catalogVersion: String!
   $metadata: String!
 ) @transaction @auth(level: NO_ACCESS) {
@@ -425,7 +425,7 @@ mutation CreateSaviUserAndAccountWithWelcomeGrant(
   creditAccount_insert(data: {
     id: $accountId
     userId: $userId
-    availableCredits: $welcomeCredits
+    availableCredits: 300
     reservedCredits: 0
     subscriptionCredits: 0
     reservedSubscriptionCredits: 0
@@ -440,7 +440,7 @@ mutation CreateSaviUserAndAccountWithWelcomeGrant(
     grantType: "welcome_grant"
     catalogItemId: "free"
     catalogVersion: $catalogVersion
-    credits: $welcomeCredits
+    credits: 300
     ledgerTransactionId: $transactionId
     status: "granted"
     metadata: $metadata
@@ -450,7 +450,7 @@ mutation CreateSaviUserAndAccountWithWelcomeGrant(
     eventKey: $grantKey
     userId: $userId
     type: "credit_grant"
-    amount: $welcomeCredits
+    amount: 300
     reason: "welcome_grant"
     metadata: $metadata
   })
@@ -473,12 +473,15 @@ mutation GrantWelcomeCredit(
   $provider: String!
   $providerEventId: String!
   $userId: UUID!
-  $welcomeCredits: Int!
+  $welcomeCredits: Int @retired(reason: "Welcome grants are locked at 300 credits.")
   $catalogVersion: String!
   $metadata: String!
 ) @transaction @auth(level: NO_ACCESS) {
-  query @check(expr: "response.query.saviUsers.size() == 1", message: "SAVI_USER_NOT_ACTIVE") {
+  query @check(expr: "response.query.saviUsers.size() == 1 && response.query.creditGrants.size() == 0", message: "WELCOME_GRANT_NOT_ALLOWED") {
     saviUsers(where: { id: { eq: $userId }, status: { eq: "active" } }, limit: 1) {
+      id
+    }
+    creditGrants(where: { userId: { eq: $userId }, grantType: { eq: "welcome_grant" } }, limit: 1) {
       id
     }
   }
@@ -491,7 +494,7 @@ mutation GrantWelcomeCredit(
     grantType: "welcome_grant"
     catalogItemId: "free"
     catalogVersion: $catalogVersion
-    credits: $welcomeCredits
+    credits: 300
     ledgerTransactionId: $transactionId
     status: "granted"
     metadata: $metadata
@@ -499,7 +502,7 @@ mutation GrantWelcomeCredit(
   creditAccount_updateMany(
     where: { userId: { eq: $userId } }
     data: {
-      availableCredits_update: { inc: $welcomeCredits }
+      availableCredits_update: { inc: 300 }
       updatedAt_expr: "request.time"
     }
   ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_MISSING")
@@ -508,7 +511,7 @@ mutation GrantWelcomeCredit(
     eventKey: $grantKey
     userId: $userId
     type: "credit_grant"
-    amount: $welcomeCredits
+    amount: 300
     reason: "welcome_grant"
     metadata: $metadata
   })
@@ -681,7 +684,7 @@ mutation ReserveTextToImageJob(
     where: {
       userId: { eq: $userId }
       availableCredits: { ge: $credits }
-      subscriptionCredits: { eq: $expectedSubscriptionCredits }
+      subscriptionCredits: { eq: $expectedSubscriptionCredits, ge: $subscriptionCredits }
       reservedSubscriptionCredits: { eq: $expectedReservedSubscriptionCredits }
     }
     data: {
@@ -758,6 +761,8 @@ mutation FinalizeTextToImageJob(
       userId: { eq: $userId }
       jobId: { eq: $jobId }
       status: { eq: "reserved" }
+      amount: { eq: $credits }
+      subscriptionCredits: { eq: $subscriptionCredits }
     }, limit: 1) {
       id
     }
@@ -862,6 +867,8 @@ mutation ReleaseTextToImageReservation(
       userId: { eq: $userId }
       jobId: { eq: $jobId }
       status: { eq: "reserved" }
+      amount: { eq: $credits }
+      subscriptionCredits: { eq: $subscriptionCredits }
     }, limit: 1) {
       id
     }
@@ -955,7 +962,7 @@ mutation ReserveGenerationJob(
     where: {
       userId: { eq: $userId }
       availableCredits: { ge: $credits }
-      subscriptionCredits: { eq: $expectedSubscriptionCredits }
+      subscriptionCredits: { eq: $expectedSubscriptionCredits, ge: $subscriptionCredits }
       reservedSubscriptionCredits: { eq: $expectedReservedSubscriptionCredits }
     }
     data: {
@@ -1036,6 +1043,8 @@ mutation FinalizeGenerationJob(
       userId: { eq: $userId }
       jobId: { eq: $jobId }
       status: { eq: "reserved" }
+      amount: { eq: $credits }
+      subscriptionCredits: { eq: $subscriptionCredits }
     }, limit: 1) {
       id
     }
@@ -1143,6 +1152,8 @@ mutation ReleaseGenerationReservation(
       userId: { eq: $userId }
       jobId: { eq: $jobId }
       status: { eq: "reserved" }
+      amount: { eq: $credits }
+      subscriptionCredits: { eq: $subscriptionCredits }
     }, limit: 1) {
       id
     }
@@ -1467,6 +1478,43 @@ mutation RecordPaymentEventOnly(
   })
 }
 
+# Status changes caused by a refund or dispute must be committed with the
+# provider event. A duplicate provider event then rolls back both writes.
+mutation RecordPaymentEventAndUpdatePurchaseStatus(
+  $eventId: UUID!
+  $provider: String!
+  $providerEventId: String!
+  $eventType: String!
+  $livemode: Boolean!
+  $objectId: String
+  $purchaseId: UUID!
+  $userId: UUID!
+  $expectedStatus: String!
+  $nextStatus: String!
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  paymentEvent_insert(data: {
+    id: $eventId
+    provider: $provider
+    providerEventId: $providerEventId
+    eventType: $eventType
+    livemode: $livemode
+    objectId: $objectId
+    userId: $userId
+    status: "processed"
+    metadata: $metadata
+    processedAt_expr: "request.time"
+  })
+  commercePurchase_updateMany(
+    where: { id: { eq: $purchaseId }, userId: { eq: $userId }, status: { eq: $expectedStatus } }
+    data: {
+      status: $nextStatus
+      metadata: $metadata
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "PURCHASE_STATUS_STATE_CHANGED")
+}
+
 mutation FulfillTopUpPurchase(
   $eventId: UUID!
   $purchaseId: UUID!
@@ -1727,6 +1775,173 @@ mutation FulfillSubscriptionCreditGrant(
     type: "credit_grant"
     amount: $creditsGranted
     reason: $ledgerReason
+    metadata: $metadata
+  })
+}
+
+# Private maintenance diagnostics. These stay Admin-SDK only and deliberately
+# expose no customer route or broad repair command.
+query GetCreditIntegrityDiagnostics($cutoff: Timestamp!) @auth(level: NO_ACCESS) {
+  creditReservations(where: { status: { eq: "reserved" }, createdAt: { lt: $cutoff } }, limit: 250) {
+    id
+    jobId
+    userId
+    reservationStatus: status
+    reservationCreatedAt: createdAt
+    amount
+    subscriptionCredits
+    job {
+      jobStatus: status
+      toolId
+      provider
+      model
+      providerRequestId
+      assetPresent: asset_on_job { id }
+    }
+  }
+  creditAccounts(limit: 1000) {
+    userId
+    availableCredits
+    reservedCredits
+    subscriptionCredits
+    reservedSubscriptionCredits
+  }
+  commercePurchases(limit: 500) {
+    id
+    providerPaymentIntentId
+    providerCheckoutSessionId
+    status
+  }
+  paymentEvents(limit: 1000) {
+    objectId
+    eventType
+  }
+  commerceSubscriptions(limit: 500) {
+    providerSubscriptionId
+    status
+    providerStatus
+  }
+}
+
+# A failed request can mark its reservation for later review if its normal
+# release transaction itself fails. This never adjusts a credit balance.
+mutation MarkGenerationJobForReconciliation(
+  $jobId: UUID!
+  $reservationId: UUID!
+  $userId: UUID!
+  $failureCategory: String!
+  $failureMessage: String!
+  $providerRequestId: String
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  query @check(expr: "response.query.creditReservations.size() == 1", message: "RESERVATION_NOT_ACTIVE") {
+    creditReservations(where: {
+      id: { eq: $reservationId }
+      jobId: { eq: $jobId }
+      userId: { eq: $userId }
+      status: { eq: "reserved" }
+      job: { status: { eq: "processing" } }
+    }, limit: 1) { id }
+  }
+  generationJob_updateMany(
+    where: { id: { eq: $jobId }, userId: { eq: $userId }, status: { eq: "processing" } }
+    data: {
+      status: "reconciliation_pending"
+      failureCategory: $failureCategory
+      failureMessage: $failureMessage
+      providerRequestId: $providerRequestId
+      usageMetadata: $metadata
+    }
+  ) @check(expr: "this == 1", message: "JOB_NOT_PROCESSING")
+}
+
+# This repair only accepts an explicit reconciliation-pending, assetless job
+# and the exact amounts stored on its reservation. It is intentionally a small
+# operation rather than a broad balance adjustment.
+mutation ReconcileStaleGenerationReservation(
+  $jobId: UUID!
+  $reservationId: UUID!
+  $userId: UUID!
+  $credits: Int!
+  $subscriptionCredits: Int!
+  $releaseTransactionId: UUID!
+  $releaseEventKey: String!
+  $usageId: UUID!
+  $toolId: String!
+  $provider: String!
+  $model: String!
+  $providerRequestId: String
+  $metadata: String!
+) @transaction @auth(level: NO_ACCESS) {
+  query @check(expr: "response.query.creditReservations.size() == 1 && response.query.creditReservations[0].job.asset_on_job == null", message: "RESERVATION_NOT_RECONCILABLE") {
+    creditReservations(where: {
+      id: { eq: $reservationId }
+      userId: { eq: $userId }
+      jobId: { eq: $jobId }
+      status: { eq: "reserved" }
+      amount: { eq: $credits, gt: 0 }
+      subscriptionCredits: { eq: $subscriptionCredits, ge: 0, le: $credits }
+      job: { status: { eq: "reconciliation_pending" } }
+    }, limit: 1) {
+      id
+      job { asset_on_job { id } }
+    }
+  }
+  creditReservation_updateMany(
+    where: { id: { eq: $reservationId }, status: { eq: "reserved" } }
+    data: { status: "released", releasedAt_expr: "request.time" }
+  ) @check(expr: "this == 1", message: "RESERVATION_NOT_RECONCILABLE")
+  creditAccount_updateMany(
+    where: {
+      userId: { eq: $userId }
+      reservedCredits: { ge: $credits }
+      reservedSubscriptionCredits: { ge: $subscriptionCredits }
+    }
+    data: {
+      availableCredits_update: { inc: $credits }
+      reservedCredits_update: { dec: $credits }
+      subscriptionCredits_update: { inc: $subscriptionCredits }
+      reservedSubscriptionCredits_update: { dec: $subscriptionCredits }
+      updatedAt_expr: "request.time"
+    }
+  ) @check(expr: "this == 1", message: "CREDIT_ACCOUNT_MISMATCH")
+  generationJob_updateMany(
+    where: { id: { eq: $jobId }, userId: { eq: $userId }, status: { eq: "reconciliation_pending" } }
+    data: {
+      status: "failed"
+      failureCategory: "RECONCILED_RELEASE"
+      failureMessage: "A failed settlement reservation was safely released."
+      providerRequestId: $providerRequestId
+      failedAt_expr: "request.time"
+      usageMetadata: $metadata
+    }
+  ) @check(expr: "this == 1", message: "JOB_NOT_RECONCILABLE")
+  aiUsage_insert(data: {
+    id: $usageId
+    userId: $userId
+    jobId: $jobId
+    toolId: $toolId
+    provider: $provider
+    model: $model
+    inputReferenceCount: 0
+    imageCount: 0
+    retryCount: 0
+    success: false
+    providerRequestId: $providerRequestId
+    creditsReserved: $credits
+    creditsCharged: 0
+    creditsReleased: $credits
+    metadata: $metadata
+  })
+  creditTransaction_insert(data: {
+    id: $releaseTransactionId
+    eventKey: $releaseEventKey
+    userId: $userId
+    jobId: $jobId
+    reservationId: $reservationId
+    type: "refund"
+    amount: $credits
+    reason: "stale_reservation_reconciled"
     metadata: $metadata
   })
 }

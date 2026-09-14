@@ -14,6 +14,7 @@ import {
   type SaviPricingQuote
 } from '@/lib/pricing/saviPricing';
 import type { TextToImageAspectRatio, TextToImageQuality } from '@/lib/pricing/textToImageCatalog';
+import { assertReservationAmounts } from '@/lib/savi/creditIntegrity';
 
 const CLIENT_REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const UUID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9a-f]{32})$/i;
@@ -292,7 +293,6 @@ async function ensureWelcomeGrant(databaseUser: DatabaseUser) {
       provider: 'internal',
       providerEventId: grantKey,
       userId: databaseUser.id,
-      welcomeCredits: SAVI_FREE_WELCOME_CREDITS,
       catalogVersion: SAVI_COMMERCE_CATALOG_VERSION,
       metadata: metadata({ source: 'free_welcome_grant', credits: SAVI_FREE_WELCOME_CREDITS })
     });
@@ -329,7 +329,6 @@ export async function resolveSaviDatabaseUser(user: SaviUser): Promise<DatabaseU
         email: databaseUser.email,
         displayName: databaseUser.displayName,
         avatarUrl: databaseUser.avatarUrl,
-        welcomeCredits: SAVI_FREE_WELCOME_CREDITS,
         catalogVersion: SAVI_COMMERCE_CATALOG_VERSION,
         metadata: metadata({ source: 'free_welcome_grant', credits: SAVI_FREE_WELCOME_CREDITS })
       })
@@ -459,6 +458,7 @@ async function reserveTextToImageCredits(input: {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const account = await getCreditAccount(input.userId);
     reservation.subscriptionCredits = Math.min(account.subscriptionCredits, reservation.credits);
+    assertReservationAmounts(reservation.credits, reservation.subscriptionCredits);
 
     try {
       await dataConnectMutation('ReserveTextToImageJob', {
@@ -572,6 +572,7 @@ async function finalizeTextToImage(input: {
   referenceImageCount: number;
   durationMs: number;
 }) {
+  assertReservationAmounts(input.reservation.credits, input.reservation.subscriptionCredits);
   await dataConnectMutation('FinalizeTextToImageJob', {
     jobId: input.reservation.jobId,
     reservationId: input.reservation.reservationId,
@@ -633,6 +634,7 @@ async function releaseTextToImageReservation(input: {
   providerRequestId?: string;
   usage?: GeneratedImageOutput['usage'];
 }) {
+  assertReservationAmounts(input.reservation.credits, input.reservation.subscriptionCredits);
   const job = await getGenerationJob(input.userId, input.reservation.jobId).catch(() => null);
   if (!job || job.status !== 'processing') return;
 
@@ -673,6 +675,20 @@ async function releaseTextToImageReservation(input: {
       })
     });
   } catch {
+    await dataConnectMutation('MarkGenerationJobForReconciliation', {
+      jobId: input.reservation.jobId,
+      reservationId: input.reservation.reservationId,
+      userId: input.userId,
+      failureCategory: input.failure.category,
+      failureMessage: 'Normal credit-release settlement failed and requires maintenance reconciliation.',
+      providerRequestId: input.providerRequestId || input.failure.providerRequestId || null,
+      metadata: metadata({
+        source: 'text_to_image_release_failure',
+        toolId: 'text_to_image',
+        provider: 'gemini',
+        failureCategory: input.failure.category
+      })
+    }).catch(() => undefined);
     throw new SaviInfrastructureError('INTERNAL_ERROR', 500, errorMessage('INTERNAL_ERROR'));
   }
 }

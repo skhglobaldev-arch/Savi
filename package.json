@@ -11,7 +11,8 @@
     "production:preflight": "node scripts/production-preflight.mjs",
     "test:pdf": "node --experimental-strip-types --test lib/pdf/hybridPdf.test.ts lib/pdf/workflowState.test.ts",
     "test:security": "node --experimental-strip-types --test lib/savi/backendSecurity.test.ts lib/savi/rateLimitPolicy.test.ts",
-    "test:security:runtime": "node -r sucrase/register --test lib/savi/rateLimitRuntime.test.ts"
+    "test:security:runtime": "node -r sucrase/register --test lib/savi/rateLimitRuntime.test.ts",
+    "test:integrity": "node --experimental-strip-types --test lib/savi/creditIntegrity.test.ts lib/commerce/commerceIntegrity.test.ts"
   },
   "dependencies": {
     "firebase-admin": "^14.3.0",

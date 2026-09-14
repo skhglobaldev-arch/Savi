@@ -14,12 +14,17 @@ import {
 import {
   isoFromUnixSeconds,
   normalizeSubscriptionStatus,
+  canReceiveRecurringSubscriptionGrant,
   shouldGrantSubscriptionCredits,
   subscriptionGrantKey,
   topUpGrantKey
 } from '@/lib/commerce/fulfillment';
 import { getStripeClient } from '@/lib/commerce/stripe';
 import { getSaviDataConnect } from '@/lib/firebase/admin';
+import {
+  assertSafeCreditAmount,
+  calculateSubscriptionRenewalGrant
+} from '@/lib/savi/creditIntegrity';
 import {
   assertSaviAccountCanMutate,
   getAuthoritativeCreditAccountByUserId,
@@ -322,6 +327,40 @@ async function recordPaymentEvent(input: {
   return findPaymentEvent(input.event.id);
 }
 
+async function recordPaymentEventWithPurchaseStatus(input: {
+  event: Stripe.Event;
+  objectId: string | null;
+  purchase: CommercePurchase;
+  expectedStatus: string;
+  nextStatus: string;
+  metadata: Record<string, unknown>;
+}) {
+  const existing = await findPaymentEvent(input.event.id);
+  if (existing) return existing;
+  try {
+    await dataConnectMutation('RecordPaymentEventAndUpdatePurchaseStatus', {
+      eventId: randomUUID(),
+      provider: PROVIDER,
+      providerEventId: input.event.id,
+      eventType: input.event.type,
+      livemode: Boolean(input.event.livemode),
+      objectId: input.objectId,
+      purchaseId: input.purchase.id,
+      userId: input.purchase.userId,
+      expectedStatus: input.expectedStatus,
+      nextStatus: input.nextStatus,
+      metadata: metadata(input.metadata)
+    });
+  } catch (error) {
+    if (isDuplicateWrite(error)) {
+      const raced = await findPaymentEvent(input.event.id);
+      if (raced) return raced;
+    }
+    throw error;
+  }
+  return findPaymentEvent(input.event.id);
+}
+
 export async function getOrCreateStripeCommerceCustomer(user: SaviUser) {
   const databaseUser = (await resolveSaviDatabaseUser(user)) as DatabaseUser;
   const existing = await findCommerceCustomer(databaseUser.id);
@@ -559,6 +598,7 @@ export async function handleStripeCheckoutCompleted(event: Stripe.Event) {
     providerCheckoutSessionId: hydrated.id,
     providerPaymentIntentId: paymentIntentId
   });
+  assertSafeCreditAmount(pack.creditsGranted, 'top-up credits');
   const eventMetadata = metadata({
     providerEventId: event.id,
     providerEventType: event.type,
@@ -741,6 +781,20 @@ export async function handleStripeInvoicePaid(event: Stripe.Event) {
     });
   }
 
+  if (!canReceiveRecurringSubscriptionGrant(subscription.status, subscription.providerStatus)) {
+    return recordPaymentEvent({
+      event,
+      objectId: invoice.id,
+      userId: commerceCustomer.userId,
+      status: 'ignored',
+      metadata: {
+        reason: 'subscription_not_entitled_for_recurring_grant',
+        subscriptionStatus: subscription.status,
+        providerStatus: subscription.providerStatus
+      }
+    });
+  }
+
   const period = periodFromLine(line);
   const grantKey = subscriptionGrantKey({
     provider: PROVIDER,
@@ -751,8 +805,12 @@ export async function handleStripeInvoicePaid(event: Stripe.Event) {
   });
   const creditAccount = await getAuthoritativeCreditAccountByUserId(commerceCustomer.userId);
   const outstandingSubscriptionCredits = creditAccount.subscriptionCredits + creditAccount.reservedSubscriptionCredits;
-  const remainingRolloverCapacity = Math.max(0, plan.rolloverCapCredits - outstandingSubscriptionCredits);
-  const creditsGranted = Math.min(plan.includedRecurringCredits, remainingRolloverCapacity);
+  const creditsGranted = calculateSubscriptionRenewalGrant({
+    includedRecurringCredits: plan.includedRecurringCredits,
+    rolloverCapCredits: plan.rolloverCapCredits,
+    subscriptionCredits: creditAccount.subscriptionCredits,
+    reservedSubscriptionCredits: creditAccount.reservedSubscriptionCredits
+  });
   const grantStatus = creditsGranted > 0 ? 'granted' : 'capped';
   const ledgerReason = creditsGranted > 0 ? 'subscription_grant' : 'subscription_rollover_cap';
 
@@ -884,11 +942,13 @@ export async function handleStripeDisputeEvent(event: Stripe.Event) {
     });
 
     if (purchaseStatus !== existingStatus || nextMetadata !== purchase.metadata) {
-      await dataConnectMutation('UpdateCommercePurchaseStatus', {
-        purchaseId: purchase.id,
-        userId: purchase.userId,
-        status: purchaseStatus,
-        metadata: nextMetadata
+      return recordPaymentEventWithPurchaseStatus({
+        event,
+        objectId: disputeId,
+        purchase,
+        expectedStatus: existingStatus ?? purchase.status,
+        nextStatus: purchaseStatus,
+        metadata: parseMetadata(nextMetadata)
       });
     }
   }
@@ -918,18 +978,20 @@ export async function recordStripeEventOnly(event: Stripe.Event, status: 'proces
   const paymentIntentId = stringId(object.payment_intent);
   if (status === 'processed' && (reason === 'recorded_refund' || reason === 'recorded_dispute') && paymentIntentId) {
     const purchase = await findCommercePurchaseByPaymentIntent(paymentIntentId);
-    if (purchase && purchase.status !== 'refunded' && purchase.status !== 'disputed') {
-      await dataConnectMutation('UpdateCommercePurchaseStatus', {
-        purchaseId: purchase.id,
-        userId: purchase.userId,
-        status: reason === 'recorded_refund' ? 'refunded' : 'disputed',
-        metadata: metadata({
+    if (purchase && !['refunded', 'disputed', 'dispute_won', 'dispute_lost'].includes(purchase.status)) {
+      return recordPaymentEventWithPurchaseStatus({
+        event,
+        objectId: typeof object.id === 'string' ? object.id : null,
+        purchase,
+        expectedStatus: purchase.status,
+        nextStatus: reason === 'recorded_refund' ? 'refunded' : 'disputed',
+        metadata: {
           previousStatus: purchase.status,
           providerEventId: event.id,
           providerEventType: event.type,
           paymentIntentId,
           reason
-        })
+        }
       });
     }
   }
