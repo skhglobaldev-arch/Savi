@@ -13,6 +13,7 @@ import {
 } from '@/lib/commerce/catalog';
 import {
   isoFromUnixSeconds,
+  isProviderEventSuperseded,
   normalizeSubscriptionStatus,
   canReceiveRecurringSubscriptionGrant,
   shouldGrantSubscriptionCredits,
@@ -76,6 +77,7 @@ type CommerceSubscription = {
   currentPeriodEnd?: string | null;
   cancelAtPeriodEnd: boolean;
   canceledAt?: string | null;
+  metadata?: string | null;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -156,6 +158,18 @@ function parseMetadata(value: string | null | undefined) {
 
 function isFinalDisputePurchaseStatus(status: string) {
   return status === 'dispute_won' || status === 'dispute_lost';
+}
+
+function providerEventCreatedAt(event: Stripe.Event) {
+  return typeof event.created === 'number' && Number.isSafeInteger(event.created) && event.created > 0
+    ? event.created
+    : null;
+}
+
+function isSubscriptionEventSuperseded(existing: CommerceSubscription, event: Stripe.Event) {
+  const recorded = parseMetadata(existing.metadata).providerEventCreatedAt;
+  const incoming = providerEventCreatedAt(event);
+  return isProviderEventSuperseded(recorded, incoming);
 }
 
 function unixNumber(value: unknown) {
@@ -649,7 +663,7 @@ export async function handleStripeCheckoutCompleted(event: Stripe.Event) {
   return findPaymentEvent(event.id);
 }
 
-export async function syncStripeSubscription(event: Stripe.Event, subscriptionObject?: Stripe.Subscription) {
+export async function syncStripeSubscription(event: Stripe.Event, subscriptionObject?: Stripe.Subscription, retryCount = 0): Promise<PaymentEvent | null> {
   const subscription = subscriptionObject ?? (event.data.object as Stripe.Subscription);
   const providerSubscriptionId = subscription.id;
   const providerCustomerId = stringId(subscription.customer);
@@ -669,6 +683,15 @@ export async function syncStripeSubscription(event: Stripe.Event, subscriptionOb
   }
 
   const existing = await findCommerceSubscription(providerSubscriptionId);
+  if (existing && isSubscriptionEventSuperseded(existing, event)) {
+    return recordPaymentEvent({
+      event,
+      objectId: providerSubscriptionId,
+      userId: commerceCustomer.userId,
+      status: 'ignored',
+      metadata: { reason: 'subscription_event_superseded', providerSubscriptionId }
+    });
+  }
   const record = asRecord(subscription);
   const firstItemRecord = asRecord(subscription.items?.data?.[0]);
   const currentPeriodStart =
@@ -678,6 +701,7 @@ export async function syncStripeSubscription(event: Stripe.Event, subscriptionOb
   const subscriptionMetadata = metadata({
     providerEventId: event.id,
     providerEventType: event.type,
+    providerEventCreatedAt: providerEventCreatedAt(event),
     providerSubscriptionId,
     priceId,
     planId: plan.id,
@@ -706,7 +730,8 @@ export async function syncStripeSubscription(event: Stripe.Event, subscriptionOb
     if (existing) {
       await dataConnectMutation('UpdateCommerceSubscriptionFromEvent', {
         ...variables,
-        subscriptionId: existing.id
+        subscriptionId: existing.id,
+        expectedUpdatedAt: existing.updatedAt
       });
     } else {
       await dataConnectMutation('CreateCommerceSubscriptionFromEvent', {
@@ -718,6 +743,9 @@ export async function syncStripeSubscription(event: Stripe.Event, subscriptionOb
       });
     }
   } catch (error) {
+    if (existing && errorText(error).includes('subscription_state_changed') && retryCount === 0) {
+      return syncStripeSubscription(event, subscription, retryCount + 1);
+    }
     if (isDuplicateWrite(error)) {
       return recordPaymentEvent({
         event,

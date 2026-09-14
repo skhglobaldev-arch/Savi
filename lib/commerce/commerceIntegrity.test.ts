@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   canReceiveRecurringSubscriptionGrant,
+  isProviderEventSuperseded,
   shouldGrantSubscriptionCredits,
   subscriptionGrantKey,
   topUpGrantKey
@@ -43,6 +44,21 @@ test('webhook policy keeps invoice.paid record-only and status/event writes atom
   assert.match(webhook, /invoice\.paid[\s\S]*recorded_invoice_paid_no_credit_change/);
   assert.match(server, /RecordPaymentEventAndUpdatePurchaseStatus/);
   assert.match(operations, /mutation RecordPaymentEventAndUpdatePurchaseStatus[\s\S]*@transaction/);
+});
+
+test('subscription synchronization rejects superseded events and uses an optimistic state guard', () => {
+  const server = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
+  const operations = readFileSync(new URL('../../dataconnect/savi/operations.gql', import.meta.url), 'utf8');
+  assert.match(server, /providerEventCreatedAt/);
+  assert.match(server, /subscription_event_superseded/);
+  assert.match(server, /expectedUpdatedAt: existing\.updatedAt/);
+  const updateOperation = operations.slice(operations.indexOf('mutation UpdateCommerceSubscriptionFromEvent'), operations.indexOf('mutation FulfillSubscriptionCreditGrant'));
+  assert.match(updateOperation, /\$expectedUpdatedAt: Timestamp/);
+  assert.match(updateOperation, /updatedAt: \{ eq: \$expectedUpdatedAt \}/);
+  assert.match(updateOperation, /SUBSCRIPTION_STATE_CHANGED/);
+  assert.equal(isProviderEventSuperseded(200, 100), true);
+  assert.equal(isProviderEventSuperseded(100, 100), false);
+  assert.equal(isProviderEventSuperseded(null, 100), false);
 });
 
 test('subscription disputes retain metadata and do not imply destructive credit reversal', () => {

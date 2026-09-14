@@ -1416,6 +1416,7 @@ query FindCommerceSubscriptionByProvider($provider: String!, $providerSubscripti
     currentPeriodEnd
     cancelAtPeriodEnd
     canceledAt
+    metadata
     createdAt
     updatedAt
   }
@@ -1663,6 +1664,7 @@ mutation UpdateCommerceSubscriptionFromEvent(
   $objectId: String
   $userId: UUID!
   $subscriptionId: UUID!
+  $expectedUpdatedAt: Timestamp
   $planId: String!
   $catalogVersion: String!
   $status: String!
@@ -1686,7 +1688,7 @@ mutation UpdateCommerceSubscriptionFromEvent(
     processedAt_expr: "request.time"
   })
   commerceSubscription_updateMany(
-    where: { id: { eq: $subscriptionId }, userId: { eq: $userId } }
+    where: { id: { eq: $subscriptionId }, userId: { eq: $userId }, updatedAt: { eq: $expectedUpdatedAt } }
     data: {
       planId: $planId
       catalogVersion: $catalogVersion
@@ -1699,7 +1701,7 @@ mutation UpdateCommerceSubscriptionFromEvent(
       metadata: $metadata
       updatedAt_expr: "request.time"
     }
-  ) @check(expr: "this == 1", message: "SUBSCRIPTION_NOT_FOUND")
+  ) @check(expr: "this == 1", message: "SUBSCRIPTION_STATE_CHANGED")
 }
 
 mutation FulfillSubscriptionCreditGrant(

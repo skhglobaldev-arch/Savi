@@ -62,3 +62,9 @@ export function shouldGrantSubscriptionCredits(invoiceStatus: string | null | un
 export function canReceiveRecurringSubscriptionGrant(status: string, providerStatus: string) {
   return ['active', 'trialing'].includes(status) && ['active', 'trialing'].includes(providerStatus);
 }
+
+export function isProviderEventSuperseded(recordedEventCreatedAt: unknown, incomingEventCreatedAt: unknown) {
+  return typeof recordedEventCreatedAt === 'number' && Number.isSafeInteger(recordedEventCreatedAt) && recordedEventCreatedAt > 0 &&
+    typeof incomingEventCreatedAt === 'number' && Number.isSafeInteger(incomingEventCreatedAt) && incomingEventCreatedAt > 0 &&
+    recordedEventCreatedAt > incomingEventCreatedAt;
+}
