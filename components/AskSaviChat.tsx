@@ -9,6 +9,7 @@ import { recordMediaItem } from '@/lib/mediaLibrary';
 import { getSaviAgentTool, type SaviAgentPlan, type SaviAgentToolId } from '@/lib/ai/saviAgent';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 import { createSaviRadioScript } from '@/lib/voice/radioScript';
+import { SAVI_EXTRACT_IMAGES_AVAILABLE } from '@/lib/pdf/workflowState';
 import {
   applyAuthoritativeBalance,
   clearSaviClientRequestId,
@@ -141,6 +142,14 @@ const PDF_TOOL_TITLES: Record<string, string> = {
   translate_summary: 'Translate PDF',
   pdf_podcast: 'PDF to Podcast Script'
 };
+
+function extractImagesUnavailableMessage(language: 'fa' | 'en' = 'en') {
+  return localizedText(
+    language,
+    'ابزار استخراج تصاویر PDF فعلاً در دسترس نیست و هیچ اعتباری کم نمی‌شود.',
+    'Extract Images is temporarily unavailable. No credits will be used.'
+  );
+}
 
 function makeId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -454,14 +463,17 @@ function inferActionWithAttachments(message: string, attachments: ChatAttachment
       };
     }
 
+    const unavailable = toolId === 'extract_images' && !SAVI_EXTRACT_IMAGES_AVAILABLE;
     return {
       id: makeId(),
       tool: 'file_studio',
       title: PDF_TOOL_TITLES[toolId] || 'PDF Tool',
       mode: 'Files',
       prompt: prompt || (toolId === 'organize_pdf' ? 'Organize this PDF.' : defaultPdfPrompt(toolId, language)),
-      reason: localizedText(language, `فایل ${pdfAttachments[0].name} آماده است. همین‌جا خروجی را می‌سازم.`, `I can process ${pdfAttachments[0].name} in this chat and return the result here.`),
-      canRunInChat: true,
+      reason: unavailable
+        ? extractImagesUnavailableMessage(language)
+        : localizedText(language, `فایل ${pdfAttachments[0].name} آماده است. همین‌جا خروجی را می‌سازم.`, `I can process ${pdfAttachments[0].name} in this chat and return the result here.`),
+      canRunInChat: !unavailable,
       toolId,
       language,
       swapPages: swapPages || undefined,
@@ -852,6 +864,7 @@ function actionFromAgentPlan(plan: AgentPlanResponse, attachments: ChatAttachmen
   const hasRequiredInput = !requiresUpload || actionAttachments.length > 0;
   const shouldRunInChat = plan.intent === 'tool' && hasRequiredInput;
   const language = plan.language || userLanguage(plan.prompt);
+  const unavailable = toolId === 'extract_images' && !SAVI_EXTRACT_IMAGES_AVAILABLE;
 
   return {
     id: makeId(),
@@ -859,9 +872,9 @@ function actionFromAgentPlan(plan: AgentPlanResponse, attachments: ChatAttachmen
     title: tool.title,
     mode: tool.category === 'image' ? 'Images' : tool.category === 'voice' ? 'Voice' : tool.category === 'video' ? 'Video' : tool.category === 'file' ? 'Files' : 'Ask AI',
     prompt: plan.prompt,
-    reason: plan.reply,
-    intro: plan.reply,
-    canRunInChat: shouldRunInChat,
+    reason: unavailable ? extractImagesUnavailableMessage(language) : plan.reply,
+    intro: unavailable ? extractImagesUnavailableMessage(language) : plan.reply,
+    canRunInChat: shouldRunInChat && !unavailable,
     toolId: assistantTool === 'smart_chat' || assistantTool === 'voice_tts' || assistantTool === 'radio_talk' ? undefined : toolId,
     language,
     swapPages: plan.pageA && plan.pageB ? [plan.pageA, plan.pageB] : undefined,
@@ -1150,6 +1163,12 @@ export function AskSaviChat({
       const toolId = pending.toolId || inferPdfToolId(pending.prompt);
       const allPdfs = [...uploadedPdfs, ...recentAttachmentsRef.current.pdf]
         .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index);
+
+      if (toolId === 'extract_images' && !SAVI_EXTRACT_IMAGES_AVAILABLE) {
+        pendingUploadActionRef.current = null;
+        addAssistantMessage(extractImagesUnavailableMessage(language));
+        return;
+      }
 
       if (toolId === 'merge_pdf') {
         if (allPdfs.length < 2) {
@@ -1705,6 +1724,14 @@ export function AskSaviChat({
 
   async function executeAction(messageId: string, action: PendingAction) {
     if (runningActionId) return;
+
+    if (action.toolId === 'extract_images' && !SAVI_EXTRACT_IMAGES_AVAILABLE) {
+      setMessages((current) => updateMessage(current, messageId, {
+        pendingAction: undefined,
+        content: extractImagesUnavailableMessage(action.language || 'en')
+      }));
+      return;
+    }
 
     if (!action.canRunInChat) {
       onOpenTool(action.mode);

@@ -127,6 +127,16 @@ const previewMap: Record<string, PreviewConfig> = {
       { label: 'Page 2' }
     ]
   },
+  split: {
+    kind: 'pdf',
+    title: 'Split PDF',
+    caption: 'Choose pages, export a focused PDF.',
+    slides: [
+      { label: 'PDF' },
+      { label: 'Pages 1-3' },
+      { label: 'Export' }
+    ]
+  },
   jpg: {
     kind: 'pdf',
     title: 'PDF to JPG',

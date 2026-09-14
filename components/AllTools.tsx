@@ -43,7 +43,7 @@ const toolGroups: ToolGroup[] = [
     title: 'Files',
     description: 'Organise PDFs, export pages, and understand documents.',
     icon: <ToolFileIcon />,
-    tools: fileTools.map((tool) => tool.title)
+    tools: fileTools.filter((tool) => tool.available !== false).map((tool) => tool.title)
   }
 ];
 

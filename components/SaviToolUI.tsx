@@ -71,35 +71,42 @@ export function ToolActionBar({
   quote,
   credits,
   quoteLabel,
+  disabledReason,
   disabled = false,
   loading,
   label,
+  sticky = false,
   onClick,
 }: {
   quote: number | null;
   credits: number | null;
   quoteLabel?: string;
+  disabledReason?: string;
   disabled?: boolean;
   loading?: string;
   label: string;
+  sticky?: boolean;
   onClick: () => void;
 }) {
   const estimate = quote !== null ? `Estimated: ~${quote} credits` : quoteLabel ?? 'Estimate unavailable';
+  const insufficientCredits = quote !== null && credits !== null && credits < quote;
+  const reason = disabledReason || (insufficientCredits ? `You need ${quote - credits} more credits.` : undefined);
 
   return (
-    <div className="savi-tool-action-row" aria-live="polite">
+    <div className={`savi-tool-action-row${sticky ? ' sticky bottom-3 z-20 shadow-[0_12px_35px_rgba(0,0,0,0.35)]' : ''}`} aria-live="polite">
       <div className="min-w-0">
         <p className="text-sm font-semibold text-white">{estimate}</p>
         {credits !== null ? <p className="mt-1 text-xs text-white/45">Balance: {credits.toLocaleString()} credits</p> : null}
+        {reason ? <p className="mt-1 text-xs text-amber-100/75">{reason}</p> : null}
       </div>
       <button
         type="button"
         className="savi-tool-action-primary shrink-0"
-        disabled={disabled}
-        aria-disabled={disabled}
+        disabled={disabled || insufficientCredits}
+        aria-disabled={disabled || insufficientCredits}
         onClick={onClick}
       >
-        {loading ?? label}
+        {loading || label}
       </button>
     </div>
   );

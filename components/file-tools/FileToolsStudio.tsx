@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { ToolPreview } from '@/components/ToolPreview';
 import { ToolActionBar, ToolCategoryTabs, ToolFieldLabel, ToolHeader, ToolResultEmpty, ToolStatus } from '@/components/SaviToolUI';
 import { ToolFileIcon } from '@/components/SaviIcons';
+import { PdfPageThumbnail } from '@/components/file-tools/PdfPageThumbnail';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 import { createClientPdfPages, inspectPdfFile, type ClientPdfPage } from '@/lib/pdf/clientValidation';
+import { buildPdfPagePlan, getPdfWorkflowState, SAVI_EXTRACT_IMAGES_AVAILABLE } from '@/lib/pdf/workflowState';
 import {
   applyAuthoritativeBalance,
   clearSaviClientRequestId,
@@ -17,7 +19,7 @@ import {
   revokeOwnedObjectUrl
 } from '@/lib/savi/clientGeneration';
 
-type FileToolId = 'merge' | 'organize' | 'jpg' | 'extract_images' | 'contract_summary' | 'explain_document' | 'translate_summary' | 'pdf_podcast';
+type FileToolId = 'merge' | 'organize' | 'split' | 'jpg' | 'extract_images' | 'contract_summary' | 'explain_document' | 'translate_summary' | 'pdf_podcast';
 type OutputFile = { url: string; filename: string; label: string };
 
 type PdfFileItem = {
@@ -45,6 +47,7 @@ export const fileTools: Array<{
   description: string;
   promptPlaceholder: string;
   group: 'PDF tools' | 'AI document';
+  available?: boolean;
 }> = [
   {
     id: 'merge',
@@ -61,6 +64,13 @@ export const fileTools: Array<{
     group: 'PDF tools'
   },
   {
+    id: 'split',
+    title: 'Split PDF',
+    description: 'Choose the pages to export as a separate PDF with a clear page-by-page view.',
+    promptPlaceholder: '',
+    group: 'PDF tools'
+  },
+  {
     id: 'jpg',
     title: 'PDF to JPG',
     description: 'Choose exact PDF pages and export them as high-quality JPG files in one ZIP.',
@@ -72,7 +82,8 @@ export const fileTools: Array<{
     title: 'Extract PDF images',
     description: 'Pull the original embedded images from a PDF into one downloadable ZIP.',
     promptPlaceholder: 'Example: Extract every original image embedded in this PDF and package them in one ZIP file.',
-    group: 'PDF tools'
+    group: 'PDF tools',
+    available: SAVI_EXTRACT_IMAGES_AVAILABLE
   },
   {
     id: 'contract_summary',
@@ -252,6 +263,7 @@ export function FileToolsStudio({
   const [podcastBusy, setPodcastBusy] = useState(false);
   const [draggedFileIndex, setDraggedFileIndex] = useState<number | null>(null);
   const [draggedPageIndex, setDraggedPageIndex] = useState<number | null>(null);
+  const processLockRef = useRef(false);
   const [busyLabel, setBusyLabel] = useState('');
   const [error, setError] = useState('');
   const [output, setOutput] = useState<OutputFile | null>(null);
@@ -259,16 +271,25 @@ export function FileToolsStudio({
   const [splitQuote, setSplitQuote] = useState<number | null>(null);
   const [podcastQuote, setPodcastQuote] = useState<number | null>(null);
   const workAreaRef = useRef<HTMLDivElement | null>(null);
+  const pagePreviewRequestRef = useRef<string | null>(null);
 
   const selectedTool = fileTools.find((tool) => tool.id === activeTool) ?? fileTools[0];
-  const visibleTools = fileTools.filter((tool) => tool.group === toolGroup);
+  const visibleTools = fileTools.filter((tool) => tool.group === toolGroup && tool.available !== false);
   const selectedJpgPages = useMemo(() => jpgPages.filter((page) => page.selected), [jpgPages]);
   const selectedOrganizePages = useMemo(() => pageItems.filter((page) => page.selected), [pageItems]);
   const isBusy = Boolean(busyLabel);
-  const serverToolId = activeTool === 'merge' ? 'merge_pdf' : activeTool === 'organize' ? 'organize_pdf' : activeTool === 'jpg' ? 'pdf_to_jpg' : activeTool;
+  const serverToolId = activeTool === 'merge'
+    ? 'merge_pdf'
+    : activeTool === 'organize'
+      ? 'organize_pdf'
+      : activeTool === 'split'
+        ? 'split_pdf'
+        : activeTool === 'jpg'
+          ? 'pdf_to_jpg'
+          : activeTool;
   const quotedPageCount = activeTool === 'merge'
     ? mergeFiles.reduce((total, item) => total + (item.pageCount || 0), 0)
-    : activeTool === 'organize'
+    : activeTool === 'organize' || activeTool === 'split'
       ? pageFile?.pageCount || 1
       : activeTool === 'jpg' || activeTool === 'extract_images'
         ? jpgFile?.pageCount || 1
@@ -301,7 +322,7 @@ export function FileToolsStudio({
   }, [aiPrompt.length, isAuthLoading, quotedPageCount, serverToolId, user?.id]);
 
   useEffect(() => {
-    if (isAuthLoading || !user || activeTool !== 'organize') {
+    if (isAuthLoading || !user || (activeTool !== 'organize' && activeTool !== 'split')) {
       setSplitQuote(null);
       return;
     }
@@ -363,6 +384,7 @@ export function FileToolsStudio({
   }
 
   function clearFileInputs() {
+    pagePreviewRequestRef.current = null;
     setMergeFiles([]);
     setPageFile(null);
     setPageItems([]);
@@ -425,7 +447,7 @@ export function FileToolsStudio({
     );
   }
 
-  async function loadPagePreview(file: File, mode: 'organize' | 'jpg') {
+  async function loadPagePreview(file: File, mode: 'organize' | 'split' | 'jpg') {
     clearOutput();
     setError('');
     const item: PdfFileItem = {
@@ -435,8 +457,9 @@ export function FileToolsStudio({
       size: file.size,
       status: 'previewing'
     };
+    pagePreviewRequestRef.current = item.id;
 
-    if (mode === 'organize') {
+    if (mode === 'organize' || mode === 'split') {
       setPageFile(item);
       setPageItems([]);
     } else {
@@ -446,6 +469,7 @@ export function FileToolsStudio({
 
     try {
       const preview = await inspectPdfFile(file);
+      if (pagePreviewRequestRef.current !== item.id) return;
       const readyItem = {
         ...item,
         pageCount: preview.pageCount,
@@ -456,7 +480,7 @@ export function FileToolsStudio({
         id: `${item.id}-${page.pageNumber}`
       }));
 
-      if (mode === 'organize') {
+      if (mode === 'organize' || mode === 'split') {
         setPageFile(readyItem);
         setPageItems(pages);
       } else {
@@ -464,12 +488,13 @@ export function FileToolsStudio({
         setJpgPages(pages);
       }
     } catch (previewError) {
+      if (pagePreviewRequestRef.current !== item.id) return;
       const failedItem = {
         ...item,
         status: 'error' as const,
         error: previewError instanceof Error ? previewError.message : 'Preview failed.'
       };
-      if (mode === 'organize') setPageFile(failedItem);
+      if (mode === 'organize' || mode === 'split') setPageFile(failedItem);
       else setJpgFile(failedItem);
     }
   }
@@ -641,12 +666,14 @@ export function FileToolsStudio({
   }
 
   async function runProcess(action: 'merge_pdf' | 'organize_pdf' | 'split_pdf' | 'pdf_to_jpg' | 'extract_images') {
+    if (processLockRef.current || isBusy) return;
     if (isAuthLoading) return;
     if (!user) {
       signIn();
       return;
     }
 
+    processLockRef.current = true;
     clearOutput();
     setError('');
     setBusyLabel('Preparing files...');
@@ -670,10 +697,7 @@ export function FileToolsStudio({
 
       if (action === 'organize_pdf' || action === 'split_pdf') {
         if (!pageFile) throw new Error('Upload a PDF first.');
-        const plan = (action === 'split_pdf' ? selectedOrganizePages : pageItems).map((page) => ({
-          pageNumber: page.pageNumber,
-          rotation: page.rotation
-        }));
+        const plan = buildPdfPagePlan(pageItems, action === 'split_pdf' || action === 'organize_pdf');
         form.append('files', pageFile.file);
         form.append('pagePlan', JSON.stringify(plan));
       }
@@ -727,12 +751,24 @@ export function FileToolsStudio({
       setError(processError instanceof Error ? processError.message : 'Something went wrong.');
     } finally {
       setBusyLabel('');
+      processLockRef.current = false;
     }
   }
 
   function renderMergeTool() {
+    const readyFiles = mergeFiles.filter((item) => item.status === 'ready');
+    const mergeAction = getPdfWorkflowState('merge_pdf', {
+      authenticated: Boolean(user),
+      quote: serverQuote,
+      balance: credits,
+      fileCount: mergeFiles.length,
+      readyFileCount: readyFiles.length,
+      pending: mergeFiles.some((item) => item.status === 'previewing'),
+      invalid: mergeFiles.some((item) => item.status === 'error')
+    });
+
     return (
-      <div className="space-y-5">
+      <div className="space-y-5" data-testid="merge-workspace">
         <UploadDropzone
           title="Add PDFs to merge"
           description="Choose two or more PDFs, then reorder them below before merging."
@@ -744,10 +780,14 @@ export function FileToolsStudio({
         {mergeFiles.length > 0 && (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-bold text-white/60">{mergeFiles.length} PDF files</p>
+              <div>
+                <p className="text-sm font-bold text-white/60">{mergeFiles.length} PDF files</p>
+                <p className="mt-1 text-xs text-white/40">{readyFiles.reduce((total, item) => total + (item.pageCount || 0), 0)} total pages</p>
+              </div>
               <button
                 type="button"
                 onClick={() => setMergeFiles([])}
+                aria-label="Clear selected PDFs"
                 className="rounded-full border border-violet-100 bg-white px-4 py-2 text-xs font-black text-slate-600 hover:text-violet-700"
               >
                 Clear
@@ -768,10 +808,10 @@ export function FileToolsStudio({
                   className="group flex cursor-grab gap-4 rounded-[24px] border border-white/10 bg-white/[0.045] p-3 active:cursor-grabbing"
                 >
                   <div className="flex h-24 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black/35">
-                    {item.thumbnail ? (
-                      <img src={item.thumbnail} alt="" className="h-full w-full object-cover" />
+                    {item.status === 'ready' ? (
+                      <PdfPageThumbnail file={item.file} pageNumber={1} alt={`First page of ${item.name}`} />
                     ) : (
-                      <span className="text-xs font-bold text-white/35">PDF</span>
+                      <span className="px-2 text-center text-xs font-bold text-white/45">{item.status === 'previewing' ? 'Reading PDF...' : 'Preview unavailable'}</span>
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -782,10 +822,29 @@ export function FileToolsStudio({
                     <p className="mt-2 truncate text-sm font-black text-slate-950">{item.name}</p>
                     <p className="mt-1 text-xs text-white/40">{fileSizeLabel(item.size)}</p>
                     {item.error && <p className="mt-2 text-xs text-red-200">{item.error}</p>}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={index === 0}
+                        onClick={() => setMergeFiles((current) => moveItem(current, index, index - 1))}
+                        className="mini-tool-button disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        Move up
+                      </button>
+                      <button
+                        type="button"
+                        disabled={index === mergeFiles.length - 1}
+                        onClick={() => setMergeFiles((current) => moveItem(current, index, index + 1))}
+                        className="mini-tool-button disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        Move down
+                      </button>
+                    </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setMergeFiles((current) => current.filter((next) => next.id !== item.id))}
+                    aria-label={`Remove ${item.name}`}
                     className="grid h-[44px] w-[44px] place-items-center rounded-lg border border-violet-100 bg-white text-slate-400 hover:text-violet-700"
                   >
                     <span aria-hidden="true" className="relative block h-3.5 w-3.5 before:absolute before:left-1/2 before:top-0 before:h-3.5 before:w-px before:-translate-x-1/2 before:rotate-45 before:bg-current after:absolute after:left-1/2 after:top-0 after:h-3.5 after:w-px after:-translate-x-1/2 after:-rotate-45 after:bg-current" />
@@ -799,19 +858,23 @@ export function FileToolsStudio({
         <ToolActionBar
           quote={serverQuote}
           credits={credits}
-          disabled={isBusy || mergeFiles.filter((item) => item.status === 'ready').length < 2}
+          quoteLabel={quoteLabel}
+          disabled={isBusy || !mergeAction.ready}
+          disabledReason={mergeAction.reason}
           loading={busyLabel}
           label="Merge PDFs"
+          sticky
           onClick={() => runProcess('merge_pdf')}
         />
       </div>
     );
   }
 
-  function renderPageGrid(mode: 'organize' | 'jpg') {
-    const items = mode === 'organize' ? pageItems : jpgPages;
-    const file = mode === 'organize' ? pageFile : jpgFile;
-    const setter = mode === 'organize' ? setPageItems : setJpgPages;
+  function renderPageGrid(mode: 'organize' | 'split' | 'jpg') {
+    const items = mode === 'organize' || mode === 'split' ? pageItems : jpgPages;
+    const file = mode === 'organize' || mode === 'split' ? pageFile : jpgFile;
+    const setter = mode === 'organize' || mode === 'split' ? setPageItems : setJpgPages;
+    const supportsReorder = mode === 'organize';
 
     if (!file) return null;
 
@@ -829,8 +892,7 @@ export function FileToolsStudio({
           <div>
             <p className="max-w-[260px] truncate text-sm font-black text-slate-950">{file.name}</p>
             <p className="mt-1 text-xs text-white/45">
-              {file.pageCount} pages
-              {items.length < (file.pageCount || 0) ? `, showing first ${items.length}` : ''}
+              {file.pageCount} pages, {items.filter((page) => page.selected).length} selected
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -845,42 +907,29 @@ export function FileToolsStudio({
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {items.map((page, index) => (
-            <div
+            <article
               key={page.id}
-              draggable={mode === 'organize'}
+              draggable={supportsReorder}
               onDragStart={() => setDraggedPageIndex(index)}
               onDragOver={(event) => event.preventDefault()}
               onDrop={() => {
-                if (draggedPageIndex === null || mode !== 'organize') return;
+                if (draggedPageIndex === null || !supportsReorder) return;
                 setter((current) => moveItem(current, draggedPageIndex, index));
                 setDraggedPageIndex(null);
               }}
+              onDragEnd={() => setDraggedPageIndex(null)}
               className={`rounded-[22px] border p-2 transition ${
                 page.selected ? 'border-cyan-200/45 bg-cyan-300/10' : 'border-white/10 bg-white/[0.035] opacity-60'
-              } ${mode === 'organize' ? 'cursor-grab active:cursor-grabbing' : ''}`}
+              } ${supportsReorder ? 'cursor-grab active:cursor-grabbing' : ''}`}
             >
               <button
                 type="button"
                 onClick={() => setter((current) => current.map((next) => (next.id === page.id ? { ...next, selected: !next.selected } : next)))}
+                aria-label={`${page.selected ? 'Deselect' : 'Select'} page ${page.pageNumber}`}
+                aria-pressed={page.selected}
                 className="relative block w-full overflow-hidden rounded-2xl border border-white/10 bg-black/35"
               >
-                {page.thumbnail ? (
-                  <img
-                    src={page.thumbnail}
-                    alt={`Page ${page.pageNumber}`}
-                    style={{ transform: `rotate(${page.rotation}deg)` }}
-                    className="aspect-[3/4] w-full object-cover transition"
-                  />
-                ) : (
-                  <div
-                    aria-label={`PDF page ${page.pageNumber}`}
-                    className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-2 bg-slate-950 px-2 text-white"
-                    style={{ transform: `rotate(${page.rotation}deg)` }}
-                  >
-                    <span className="text-2xl font-black">PDF</span>
-                    <span className="text-xs font-bold text-white/60">Page {page.pageNumber}</span>
-                  </div>
-                )}
+                <PdfPageThumbnail file={file.file} pageNumber={page.pageNumber} rotation={page.rotation} alt={`Preview of page ${page.pageNumber}`} />
                 <span className="absolute left-2 top-2 rounded-full bg-slate-950 px-2 py-1 text-xs font-black text-white">
                   {page.pageNumber}
                 </span>
@@ -888,10 +937,31 @@ export function FileToolsStudio({
                   {page.selected ? <span aria-hidden="true" className="h-2 w-3 -rotate-45 border-b-2 border-l-2 border-white" /> : null}
                 </span>
               </button>
-              {mode === 'organize' && (
+              <div className="mt-2 flex items-center justify-between gap-2">
+                {supportsReorder ? <span className="text-[11px] font-semibold text-white/45">Drag to reorder</span> : <span className="text-[11px] font-semibold text-white/45">Select page</span>}
+                {supportsReorder && (
+                  <span aria-hidden="true" className="text-xs text-white/45">↕</span>
+                )}
+              </div>
+              {supportsReorder && (
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <button
                     type="button"
+                    aria-label={`Rotate page ${page.pageNumber} left`}
+                    onClick={() =>
+                      setter((current) =>
+                        current.map((next) =>
+                          next.id === page.id ? { ...next, rotation: normaliseClientRotation(next.rotation - 90) } : next
+                        )
+                      )
+                    }
+                    className="mini-tool-button"
+                  >
+                    Rotate left
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Rotate page ${page.pageNumber} right`}
                     onClick={() =>
                       setter((current) =>
                         current.map((next) =>
@@ -901,18 +971,19 @@ export function FileToolsStudio({
                     }
                     className="mini-tool-button"
                   >
-                    Rotate
+                    Rotate right
                   </button>
                   <button
                     type="button"
+                    aria-label={`Remove page ${page.pageNumber}`}
                     onClick={() => setter((current) => current.filter((next) => next.id !== page.id))}
-                    className="mini-tool-button"
+                    className="mini-tool-button col-span-2"
                   >
                     Remove
                   </button>
                 </div>
               )}
-            </div>
+            </article>
           ))}
         </div>
       </div>
@@ -920,8 +991,18 @@ export function FileToolsStudio({
   }
 
   function renderOrganizeTool() {
+    const organizeAction = getPdfWorkflowState('organize_pdf', {
+      authenticated: Boolean(user),
+      quote: serverQuote,
+      balance: credits,
+      hasFile: Boolean(pageFile),
+      pending: pageFile?.status === 'previewing',
+      pageCount: pageItems.length,
+      selectedPageCount: selectedOrganizePages.length
+    });
+
     return (
-      <div className="space-y-5">
+      <div className="space-y-5" data-testid="organize-workspace">
         <UploadDropzone
           title="Choose a PDF to organize"
           description="Preview pages, then reorder, rotate, remove, or export the pages you need."
@@ -929,31 +1010,67 @@ export function FileToolsStudio({
           onFiles={(files) => loadPagePreview(files[0], 'organize')}
         />
         {renderPageGrid('organize')}
-        <div className="grid gap-3 md:grid-cols-2">
-          <ToolActionBar
-            quote={serverQuote}
-            credits={credits}
-            disabled={isBusy || !pageFile || pageItems.length < 1}
-            loading={busyLabel}
-            label="Export organized PDF"
-            onClick={() => runProcess('organize_pdf')}
-          />
-          <ToolActionBar
-            quote={splitQuote}
-            credits={credits}
-            disabled={isBusy || !pageFile || selectedOrganizePages.length < 1}
-            loading={busyLabel}
-            label="Export selected pages"
-            onClick={() => runProcess('split_pdf')}
-          />
-        </div>
+        <ToolActionBar
+          quote={serverQuote}
+          credits={credits}
+          quoteLabel={quoteLabel}
+          disabled={isBusy || !organizeAction.ready}
+          disabledReason={organizeAction.reason}
+          loading={busyLabel}
+          label="Organize PDF"
+          sticky
+          onClick={() => runProcess('organize_pdf')}
+        />
+      </div>
+    );
+  }
+
+  function renderSplitTool() {
+    const splitAction = getPdfWorkflowState('split_pdf', {
+      authenticated: Boolean(user),
+      quote: splitQuote,
+      balance: credits,
+      hasFile: Boolean(pageFile),
+      pending: pageFile?.status === 'previewing',
+      selectedPageCount: selectedOrganizePages.length
+    });
+
+    return (
+      <div className="space-y-5" data-testid="split-workspace">
+        <UploadDropzone
+          title="Choose a PDF to split"
+          description="Select the pages you want in the new PDF, then export them together."
+          busy={isBusy}
+          onFiles={(files) => loadPagePreview(files[0], 'split')}
+        />
+        {renderPageGrid('split')}
+        <ToolActionBar
+          quote={splitQuote}
+          credits={credits}
+          quoteLabel={quoteLabel}
+          disabled={isBusy || !splitAction.ready}
+          disabledReason={splitAction.reason}
+          loading={busyLabel}
+          label="Split PDF"
+          sticky
+          onClick={() => runProcess('split_pdf')}
+        />
       </div>
     );
   }
 
   function renderJpgTool() {
+    const jpgAction = getPdfWorkflowState('pdf_to_jpg', {
+      authenticated: Boolean(user),
+      quote: serverQuote,
+      balance: credits,
+      hasFile: Boolean(jpgFile),
+      pending: jpgFile?.status === 'previewing',
+      selectedPageCount: selectedJpgPages.length
+    });
+
     return (
-      <div className="space-y-5">
+      <div className="space-y-5" data-testid="jpg-workspace">
         <UploadDropzone
           title="Choose a PDF for JPGs"
           description="Select the pages to turn into high-quality JPG files."
@@ -966,9 +1083,12 @@ export function FileToolsStudio({
         <ToolActionBar
           quote={serverQuote}
           credits={credits}
-          disabled={isBusy || !jpgFile || selectedJpgPages.length < 1}
+          quoteLabel={quoteLabel}
+          disabled={isBusy || !jpgAction.ready}
+          disabledReason={jpgAction.reason}
           loading={busyLabel}
-          label={`Create ZIP from ${selectedJpgPages.length || 0} pages`}
+          label="Convert to JPG"
+          sticky
           onClick={() => runProcess('pdf_to_jpg')}
         />
       </div>
@@ -977,35 +1097,10 @@ export function FileToolsStudio({
 
   function renderExtractImagesTool() {
     return (
-      <div className="space-y-5">
-        <UploadDropzone
-          title="Choose a PDF to extract images"
-          description="SAVI will preserve embedded images and package them in one downloadable ZIP."
-          busy={isBusy}
-          onFiles={(files) => loadPagePreview(files[0], 'jpg')}
-        />
-
-        {jpgFile && (
-          <div className="rounded-[26px] border border-white/10 bg-black/25 p-5">
-            <p className="truncate text-sm font-black text-white">{jpgFile.name}</p>
-            <p className="mt-1 text-sm leading-6 text-white/55">
-              {jpgFile.status === 'previewing'
-                ? 'Checking the PDF...'
-                : jpgFile.status === 'ready'
-                  ? `${jpgFile.pageCount} pages ready. SAVI will extract original embedded images, not page screenshots.`
-                  : jpgFile.error || 'This PDF could not be opened.'}
-            </p>
-          </div>
-        )}
-
-          <ToolActionBar
-          quote={serverQuote}
-          credits={credits}
-          disabled={isBusy || !jpgFile || jpgFile.status !== 'ready'}
-          loading={busyLabel}
-          label="Extract images as ZIP"
-          onClick={() => runProcess('extract_images')}
-        />
+      <div className="space-y-5" data-testid="extract-images-unavailable">
+        <ToolStatus kind="info">
+          Extract Images is temporarily unavailable while SAVI restores its production image-extraction runtime. No credits can be spent on this tool.
+        </ToolStatus>
       </div>
     );
   }
@@ -1047,10 +1142,7 @@ export function FileToolsStudio({
               <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
                 {aiPages.map((page) => (
                   <div key={page.pageNumber} className="overflow-hidden rounded-2xl border border-violet-100 bg-white">
-                    <div className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-1 bg-slate-950 text-white">
-                      <span className="text-lg font-black">PDF</span>
-                      <span className="text-[10px] font-bold text-white/60">Page {page.pageNumber}</span>
-                    </div>
+                    <PdfPageThumbnail file={aiFile.file} pageNumber={page.pageNumber} alt={`Preview of page ${page.pageNumber}`} />
                     <p className="px-2 py-1 text-center text-[11px] font-black text-slate-500">Page {page.pageNumber}</p>
                   </div>
                 ))}
@@ -1166,7 +1258,7 @@ export function FileToolsStudio({
             options={(['PDF tools', 'AI document'] as const).map((group) => ({
               id: group,
               label: group,
-              count: fileTools.filter((tool) => tool.group === group).length
+              count: fileTools.filter((tool) => tool.group === group && tool.available !== false).length
             }))}
           />
         )}
@@ -1199,6 +1291,7 @@ export function FileToolsStudio({
       <div ref={workAreaRef} className="scroll-mt-[110px] p-5 md:p-6 lg:scroll-mt-24">
         {activeTool === 'merge' && renderMergeTool()}
         {activeTool === 'organize' && renderOrganizeTool()}
+        {activeTool === 'split' && renderSplitTool()}
         {activeTool === 'jpg' && renderJpgTool()}
         {activeTool === 'extract_images' && renderExtractImagesTool()}
         {aiDocumentTools.has(activeTool) && renderAiDocumentTool()}
@@ -1211,13 +1304,22 @@ export function FileToolsStudio({
               <p className="text-sm font-black text-emerald-100">{output.label}</p>
               <p className="mt-1 text-sm text-white/58">{output.filename}</p>
             </div>
-            <a
-              href={output.url}
-              download={output.filename}
-              className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-white px-6 py-3 text-center text-sm font-black text-black hover:bg-emerald-100"
-            >
-              Download
-            </a>
+            <div className="flex flex-wrap gap-2">
+              <a
+                href={output.url}
+                download={output.filename}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-white px-6 py-3 text-center text-sm font-black text-black hover:bg-emerald-100"
+              >
+                Download {output.label === 'ZIP ready' ? 'ZIP' : 'PDF'}
+              </a>
+              <button
+                type="button"
+                onClick={() => selectFileTool(activeTool)}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-white/20 bg-white/[0.08] px-4 py-3 text-center text-sm font-bold text-white hover:bg-white/[0.14]"
+              >
+                {activeTool === 'merge' ? 'Merge another' : activeTool === 'split' ? 'Split another PDF' : activeTool === 'jpg' ? 'Convert another PDF' : 'Organize another PDF'}
+              </button>
+            </div>
           </div>
         )}
         {!output && !aiResult && !isBusy && (

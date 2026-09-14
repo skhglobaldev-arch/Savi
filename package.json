@@ -9,13 +9,14 @@
     "start": "next start",
     "dataconnect:compile:prod": "firebase --project prod --config firebase.production.json dataconnect:compile --service savi-production-607fd-service --location europe-west2",
     "production:preflight": "node scripts/production-preflight.mjs",
-    "test:pdf": "node --experimental-strip-types --test lib/pdf/hybridPdf.test.ts"
+    "test:pdf": "node --experimental-strip-types --test lib/pdf/hybridPdf.test.ts lib/pdf/workflowState.test.ts"
   },
   "dependencies": {
     "firebase-admin": "^14.3.0",
     "jszip": "^3.10.1",
     "next": "16.3.4",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "4.10.38",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "stripe": "^22.6.1"
