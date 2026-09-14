@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import path from 'node:path';
+import { PDFDocument } from 'pdf-lib';
 import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
-import { renderPdfThumbnails, sanitizeFileName, withTempDir, writeFormFile } from '@/lib/pdf/serverTools';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 import { logOperational } from '@/lib/observability/logger';
@@ -9,8 +8,6 @@ import { logOperational } from '@/lib/observability/logger';
 export const runtime = 'nodejs';
 
 const MAX_PREVIEW_PAGES = 80;
-// Keep preview limits aligned with the paid PDF route. A preview must not let a
-// caller upload a document that the protected processor will immediately deny.
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 function isPdfFile(value: FormDataEntryValue | null): value is File {
@@ -23,7 +20,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Please sign in before previewing a PDF.', category: 'AUTH_REQUIRED' }, { status: 401 });
   }
 
-  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'FILE_PROCESSING', identity: getSaviRequestIdentity(request, session.id) });
+  const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'FILE_PREVIEW', identity: getSaviRequestIdentity(request, session.id) });
   if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   try {
@@ -40,22 +37,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'This PDF is too large for preview right now. Please use a file under 25MB.' }, { status: 413 });
     }
 
-    return await withTempDir('savi-pdf-preview-', async (dir) => {
-      const inputPath = path.join(dir, `${sanitizeFileName(file.name)}.pdf`);
-      await writeFormFile(file, inputPath);
-      const preview = await renderPdfThumbnails(inputPath, dir, maxPages);
+    const pdf = await PDFDocument.load(await file.arrayBuffer());
+    const pageCount = pdf.getPageCount();
+    if (!pageCount) return NextResponse.json({ error: 'Could not read this PDF.' }, { status: 422 });
+    const pages = Array.from({ length: Math.min(pageCount, maxPages) }, (_, index) => ({ pageNumber: index + 1 }));
 
-      if (!preview.pages.length) {
-        return NextResponse.json({ error: 'Could not render this PDF preview.' }, { status: 422 });
-      }
-
-      return NextResponse.json({
-        fileName: file.name,
-        size: file.size,
-        pageCount: preview.pageCount,
-        renderedPages: preview.pages.length,
-        pages: preview.pages
-      });
+    return NextResponse.json({
+      fileName: file.name,
+      size: file.size,
+      pageCount,
+      renderedPages: pages.length,
+      pages
     });
   } catch (error) {
     logOperational('error', 'pdf_preview_failed');

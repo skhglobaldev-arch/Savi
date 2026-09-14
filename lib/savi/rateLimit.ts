@@ -7,6 +7,7 @@ import { logOperational } from '../observability/logger';
 export type SaviRateLimitClass =
   | 'FREE_AI'
   | 'PAID_GENERATION'
+  | 'FILE_PREVIEW'
   | 'FILE_PROCESSING'
   | 'COMMERCE'
   | 'AUTH'
@@ -113,6 +114,17 @@ export function getSaviRateLimitPolicy(rateLimitClass: SaviRateLimitClass): Savi
       failureMode: 'closed',
       requiresIdentity: true
     }, 'SAVI_FILE_PROCESSING');
+  }
+  if (rateLimitClass === 'FILE_PREVIEW') {
+    return policyWithDefaults({
+      ...common,
+      windowMs: 60_000,
+      maxRequestsPerWindow: 20,
+      burstWindowMs: 5_000,
+      maxRequestsPerBurst: 4,
+      failureMode: 'closed',
+      requiresIdentity: true
+    }, 'SAVI_FILE_PREVIEW');
   }
   if (rateLimitClass === 'COMMERCE') {
     return policyWithDefaults({

@@ -8,7 +8,8 @@
     "postbuild": "node scripts/prepare-apphosting-assets.mjs",
     "start": "next start",
     "dataconnect:compile:prod": "firebase --project prod --config firebase.production.json dataconnect:compile --service savi-production-607fd-service --location europe-west2",
-    "production:preflight": "node scripts/production-preflight.mjs"
+    "production:preflight": "node scripts/production-preflight.mjs",
+    "test:pdf": "node --experimental-strip-types --test lib/pdf/hybridPdf.test.ts"
   },
   "dependencies": {
     "firebase-admin": "^14.3.0",

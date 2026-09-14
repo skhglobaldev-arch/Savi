@@ -11,6 +11,10 @@ env:
     secret: STRIPE_SECRET_KEY
   - variable: STRIPE_WEBHOOK_SECRET
     secret: STRIPE_WEBHOOK_SECRET
+  - variable: ILOVEPDF_PUBLIC_KEY
+    secret: ILOVEPDF_PUBLIC_KEY
+  - variable: ILOVEPDF_SECRET_KEY
+    secret: ILOVEPDF_SECRET_KEY
   - variable: FIREBASE_PROJECT_ID
     value: savi-production-607fd
   - variable: FIREBASE_STORAGE_BUCKET

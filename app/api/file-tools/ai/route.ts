@@ -77,7 +77,7 @@ function usageFromProvider(data: Record<string, unknown>) {
 
 async function getPageCount(buffer: Buffer) {
   try {
-    const pdf = await PDFDocument.load(buffer, { ignoreEncryption: true });
+    const pdf = await PDFDocument.load(buffer);
     return pdf.getPageCount();
   } catch {
     throw new AiPdfInputError('This is not a readable PDF.');

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -59,45 +59,6 @@ export async function writeFormFile(file: File, targetPath: string) {
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(targetPath, buffer);
   return buffer;
-}
-
-export async function getPdfPageCount(filePath: string) {
-  try {
-    const { stdout } = await runCommand('pdfinfo', [filePath]);
-    const match = stdout.match(/^Pages:\s+(\d+)/m);
-    return match ? Number(match[1]) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-export async function renderPdfThumbnails(filePath: string, dir: string, maxPages: number) {
-  const pageCount = await getPdfPageCount(filePath);
-  const pagesToRender = Math.max(0, Math.min(pageCount || maxPages, maxPages));
-
-  if (!pagesToRender) {
-    return { pageCount, pages: [] as Array<{ pageNumber: number; thumbnail: string }> };
-  }
-
-  const prefix = path.join(dir, 'thumb');
-  await runCommand('pdftoppm', ['-png', '-r', '84', '-f', '1', '-l', String(pagesToRender), filePath, prefix]);
-
-  const files = (await readdir(dir))
-    .filter((name) => /^thumb-\d+\.png$/.test(name))
-    .sort((left, right) => Number(left.match(/\d+/)?.[0] ?? 0) - Number(right.match(/\d+/)?.[0] ?? 0));
-
-  const pages = await Promise.all(
-    files.map(async (name) => {
-      const pageNumber = Number(name.match(/\d+/)?.[0] ?? 0);
-      const bytes = await readFile(path.join(dir, name));
-      return {
-        pageNumber,
-        thumbnail: `data:image/png;base64,${bytes.toString('base64')}`
-      };
-    })
-  );
-
-  return { pageCount, pages };
 }
 
 export function parsePageRange(input: string | null | undefined, pageCount: number) {

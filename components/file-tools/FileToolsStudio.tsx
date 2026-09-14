@@ -7,6 +7,7 @@ import { ToolFileIcon } from '@/components/SaviIcons';
 import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
+import { createClientPdfPages, inspectPdfFile, type ClientPdfPage } from '@/lib/pdf/clientValidation';
 import {
   applyAuthoritativeBalance,
   clearSaviClientRequestId,
@@ -18,19 +19,6 @@ import {
 
 type FileToolId = 'merge' | 'organize' | 'jpg' | 'extract_images' | 'contract_summary' | 'explain_document' | 'translate_summary' | 'pdf_podcast';
 type OutputFile = { url: string; filename: string; label: string };
-
-type PreviewPage = {
-  pageNumber: number;
-  thumbnail: string;
-};
-
-type PreviewResponse = {
-  fileName: string;
-  pageCount: number;
-  renderedPages: number;
-  pages: PreviewPage[];
-  error?: string;
-};
 
 type PdfFileItem = {
   id: string;
@@ -46,7 +34,7 @@ type PdfFileItem = {
 type PageItem = {
   id: string;
   pageNumber: number;
-  thumbnail: string;
+  thumbnail?: string;
   rotation: 0 | 90 | 180 | 270;
   selected: boolean;
 };
@@ -164,28 +152,6 @@ function fileSizeLabel(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function isPdf(file: File) {
-  return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-}
-
-async function previewPdf(file: File, maxPages: number) {
-  const form = new FormData();
-  form.append('file', file);
-  form.append('maxPages', String(maxPages));
-
-  const response = await fetch('/api/file-tools/preview', {
-    method: 'POST',
-    body: form
-  });
-  const data = (await response.json().catch(() => ({}))) as PreviewResponse;
-
-  if (!response.ok) {
-    throw new Error(data.error || 'Preview failed.');
-  }
-
-  return data;
-}
-
 function moveItem<T>(items: T[], from: number, to: number) {
   if (from === to || from < 0 || to < 0) return items;
   const next = [...items];
@@ -211,8 +177,8 @@ function UploadDropzone({
   const [isOver, setIsOver] = useState(false);
 
   function handleFiles(files: FileList | null) {
-    const pdfs = Array.from(files || []).filter(isPdf);
-    if (pdfs.length) onFiles(pdfs);
+    const selected = Array.from(files || []);
+    if (selected.length) onFiles(multiple ? selected : [selected[0]]);
   }
 
   function onDrop(event: DragEvent<HTMLDivElement>) {
@@ -278,7 +244,7 @@ export function FileToolsStudio({
   const [jpgFile, setJpgFile] = useState<PdfFileItem | null>(null);
   const [jpgPages, setJpgPages] = useState<PageItem[]>([]);
   const [aiFile, setAiFile] = useState<PdfFileItem | null>(null);
-  const [aiPages, setAiPages] = useState<PreviewPage[]>([]);
+  const [aiPages, setAiPages] = useState<Array<{ pageNumber: number }>>([]);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiResult, setAiResult] = useState('');
   const [podcastAudioUrl, setPodcastAudioUrl] = useState('');
@@ -438,11 +404,11 @@ export function FileToolsStudio({
     await Promise.all(
       items.map(async (item) => {
         try {
-          const preview = await previewPdf(item.file, 1);
+          const preview = await inspectPdfFile(item.file);
           setMergeFiles((current) =>
             current.map((next) =>
               next.id === item.id
-                ? { ...next, pageCount: preview.pageCount, thumbnail: preview.pages[0]?.thumbnail, status: 'ready' }
+                ? { ...next, pageCount: preview.pageCount, status: 'ready' }
                 : next
             )
           );
@@ -479,19 +445,15 @@ export function FileToolsStudio({
     }
 
     try {
-      const preview = await previewPdf(file, 80);
+      const preview = await inspectPdfFile(file);
       const readyItem = {
         ...item,
         pageCount: preview.pageCount,
-        thumbnail: preview.pages[0]?.thumbnail,
         status: 'ready' as const
       };
-      const pages = preview.pages.map((page) => ({
-        id: `${item.id}-${page.pageNumber}`,
-        pageNumber: page.pageNumber,
-        thumbnail: page.thumbnail,
-        rotation: 0 as const,
-        selected: true
+      const pages = createClientPdfPages(preview.pageCount).map((page: ClientPdfPage) => ({
+        ...page,
+        id: `${item.id}-${page.pageNumber}`
       }));
 
       if (mode === 'organize') {
@@ -528,14 +490,13 @@ export function FileToolsStudio({
     setAiPages([]);
 
     try {
-      const preview = await previewPdf(file, 6);
+      const preview = await inspectPdfFile(file);
       setAiFile({
         ...item,
         pageCount: preview.pageCount,
-        thumbnail: preview.pages[0]?.thumbnail,
         status: 'ready'
       });
-      setAiPages(preview.pages);
+      setAiPages(createClientPdfPages(preview.pageCount, 6).map(({ pageNumber }) => ({ pageNumber })));
     } catch (previewError) {
       setAiFile({
         ...item,
@@ -816,7 +777,7 @@ export function FileToolsStudio({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 text-xs font-black text-cyan-100/80">
                       <span className="rounded-full bg-white/10 px-2 py-1">#{index + 1}</span>
-                      <span>{item.status === 'previewing' ? 'Reading...' : `${item.pageCount || 0} pages`}</span>
+                      <span>{item.status === 'previewing' ? 'Reading PDF...' : item.status === 'ready' ? `${item.pageCount} pages` : 'Invalid PDF'}</span>
                     </div>
                     <p className="mt-2 truncate text-sm font-black text-slate-950">{item.name}</p>
                     <p className="mt-1 text-xs text-white/40">{fileSizeLabel(item.size)}</p>
@@ -869,7 +830,7 @@ export function FileToolsStudio({
             <p className="max-w-[260px] truncate text-sm font-black text-slate-950">{file.name}</p>
             <p className="mt-1 text-xs text-white/45">
               {file.pageCount} pages
-              {items.length < (file.pageCount || 0) ? `, previewing first ${items.length}` : ''}
+              {items.length < (file.pageCount || 0) ? `, showing first ${items.length}` : ''}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -903,12 +864,23 @@ export function FileToolsStudio({
                 onClick={() => setter((current) => current.map((next) => (next.id === page.id ? { ...next, selected: !next.selected } : next)))}
                 className="relative block w-full overflow-hidden rounded-2xl border border-white/10 bg-black/35"
               >
-                <img
-                  src={page.thumbnail}
-                  alt={`Page ${page.pageNumber}`}
-                  style={{ transform: `rotate(${page.rotation}deg)` }}
-                  className="aspect-[3/4] w-full object-cover transition"
-                />
+                {page.thumbnail ? (
+                  <img
+                    src={page.thumbnail}
+                    alt={`Page ${page.pageNumber}`}
+                    style={{ transform: `rotate(${page.rotation}deg)` }}
+                    className="aspect-[3/4] w-full object-cover transition"
+                  />
+                ) : (
+                  <div
+                    aria-label={`PDF page ${page.pageNumber}`}
+                    className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-2 bg-slate-950 px-2 text-white"
+                    style={{ transform: `rotate(${page.rotation}deg)` }}
+                  >
+                    <span className="text-2xl font-black">PDF</span>
+                    <span className="text-xs font-bold text-white/60">Page {page.pageNumber}</span>
+                  </div>
+                )}
                 <span className="absolute left-2 top-2 rounded-full bg-slate-950 px-2 py-1 text-xs font-black text-white">
                   {page.pageNumber}
                 </span>
@@ -1020,7 +992,7 @@ export function FileToolsStudio({
               {jpgFile.status === 'previewing'
                 ? 'Checking the PDF...'
                 : jpgFile.status === 'ready'
-                  ? `${jpgFile.pageCount || 0} pages ready. SAVI will extract original embedded images, not page screenshots.`
+                  ? `${jpgFile.pageCount} pages ready. SAVI will extract original embedded images, not page screenshots.`
                   : jpgFile.error || 'This PDF could not be opened.'}
             </p>
           </div>
@@ -1054,7 +1026,7 @@ export function FileToolsStudio({
               <div>
                 <p className="max-w-[340px] truncate text-sm font-black text-slate-950">{aiFile.name}</p>
                 <p className="mt-1 text-xs font-bold text-slate-500">
-                  {aiFile.status === 'previewing' ? 'Opening PDF...' : aiFile.status === 'ready' ? `${aiFile.pageCount || 0} pages` : aiFile.error}
+                  {aiFile.status === 'previewing' ? 'Reading PDF...' : aiFile.status === 'ready' ? `${aiFile.pageCount} pages` : aiFile.error}
                 </p>
               </div>
               <button
@@ -1075,7 +1047,10 @@ export function FileToolsStudio({
               <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
                 {aiPages.map((page) => (
                   <div key={page.pageNumber} className="overflow-hidden rounded-2xl border border-violet-100 bg-white">
-                    <img src={page.thumbnail} alt={`Page ${page.pageNumber}`} className="aspect-[3/4] w-full object-cover" />
+                    <div className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-1 bg-slate-950 text-white">
+                      <span className="text-lg font-black">PDF</span>
+                      <span className="text-[10px] font-bold text-white/60">Page {page.pageNumber}</span>
+                    </div>
                     <p className="px-2 py-1 text-center text-[11px] font-black text-slate-500">Page {page.pageNumber}</p>
                   </div>
                 ))}

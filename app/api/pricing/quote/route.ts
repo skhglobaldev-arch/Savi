@@ -14,6 +14,8 @@ import {
   SAVI_LOCAL_PDF_MODEL,
   SAVI_LOCAL_PDF_PROVIDER,
   SAVI_LOCAL_PDF_TOOL_IDS,
+  SAVI_ILOVEPDF_PDF_TO_JPG_MODEL,
+  SAVI_ILOVEPDF_PROVIDER,
   SAVI_TEXT_TO_IMAGE_PROVIDER,
   SAVI_VIDEO_TOOL_IDS,
   SAVI_VOICE_TOOL_IDS,
@@ -103,8 +105,8 @@ export async function GET(request: NextRequest) {
       });
     } else if (includes(SAVI_LOCAL_PDF_TOOL_IDS, toolId)) {
       quote = quoteSaviPrice({
-        provider: SAVI_LOCAL_PDF_PROVIDER,
-        model: SAVI_LOCAL_PDF_MODEL,
+        provider: toolId === 'pdf_to_jpg' ? SAVI_ILOVEPDF_PROVIDER : SAVI_LOCAL_PDF_PROVIDER,
+        model: toolId === 'pdf_to_jpg' ? SAVI_ILOVEPDF_PDF_TO_JPG_MODEL : SAVI_LOCAL_PDF_MODEL,
         toolId,
         operation: 'document_local',
         input: { pageCount },
@@ -156,7 +158,7 @@ export async function POST(request: NextRequest) {
 
     let pageCount = 0;
     try {
-      const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+      const pdf = await PDFDocument.load(await file.arrayBuffer());
       pageCount = pdf.getPageCount();
     } catch {
       throw new SaviPricingError('INVALID_PRICING_INPUT', 400, 'This is not a readable PDF.');

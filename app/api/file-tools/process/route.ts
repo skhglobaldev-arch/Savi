@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PDFDocument, degrees } from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib';
 import JSZip from 'jszip';
 import path from 'node:path';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
@@ -7,26 +7,35 @@ import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
 import {
   SAVI_LOCAL_PDF_MODEL,
   SAVI_LOCAL_PDF_PROVIDER,
-  SAVI_LOCAL_PDF_TOOL_IDS
+  SAVI_LOCAL_PDF_TOOL_IDS,
+  SAVI_ILOVEPDF_PDF_TO_JPG_MODEL,
+  SAVI_ILOVEPDF_PROVIDER
 } from '@/lib/pricing/saviPricing';
 import { runProtectedOperation } from '@/lib/savi/protectedOperations';
 import { SaviInfrastructureError } from '@/lib/savi/textToImageInfrastructure';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 import {
-  getPdfPageCount,
   parsePageRange,
   runCommand,
   sanitizeFileName,
   withTempDir,
   writeFormFile
 } from '@/lib/pdf/serverTools';
+import { createPagePlanPdf, mergePdfFiles, type LocalPdfOutput, PdfProcessingInputError } from '@/lib/pdf/localOperations';
+import { convertPdfToJpg, mapIlovePdfError } from '@/lib/pdf/ilovePdfServer';
 
 export const runtime = 'nodejs';
 
 type PdfAction = 'merge_pdf' | 'organize_pdf' | 'split_pdf' | 'pdf_to_jpg' | 'extract_images';
 type PagePlanItem = { pageNumber: number; rotation?: number };
-type PdfOutput = { bytes: Buffer; filename: string; mimeType: string; mediaType: 'document' | 'archive' };
+type PdfOutput = LocalPdfOutput | {
+  bytes: Buffer;
+  filename: string;
+  mimeType: 'application/zip';
+  mediaType: 'archive';
+  providerRequestId?: string;
+};
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 80 * 1024 * 1024;
@@ -36,12 +45,7 @@ const MAX_TOTAL_PAGES = 500;
 const MAX_JPG_OUTPUT_PAGES = 100;
 const MAX_EXTRACTED_IMAGES = 200;
 
-class PdfInputError extends Error {
-  constructor(message: string, readonly status = 400) {
-    super(message);
-    this.name = 'PdfInputError';
-  }
-}
+const PdfInputError = PdfProcessingInputError;
 
 function isPdfAction(value: string | undefined): value is PdfAction {
   return Boolean(value && SAVI_LOCAL_PDF_TOOL_IDS.includes(value as (typeof SAVI_LOCAL_PDF_TOOL_IDS)[number]));
@@ -79,14 +83,9 @@ function readSwapPages(value: FormDataEntryValue | null): [number, number] | nul
   }
 }
 
-function normaliseRotation(rotation = 0) {
-  const next = ((rotation % 360) + 360) % 360;
-  return [0, 90, 180, 270].includes(next) ? next : 0;
-}
-
 async function getValidatedPageCount(file: File) {
   try {
-    const pdf = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
+    const pdf = await PDFDocument.load(await file.arrayBuffer());
     const pageCount = pdf.getPageCount();
     if (!pageCount) throw new Error('empty');
     return pageCount;
@@ -118,63 +117,22 @@ async function validateFiles(files: File[]) {
   return totalPages;
 }
 
-async function createMergedPdf(files: File[]): Promise<PdfOutput> {
-  const output = await PDFDocument.create();
-  for (const file of files) {
-    const source = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-    const copiedPages = await output.copyPages(source, source.getPageIndices());
-    copiedPages.forEach((page) => output.addPage(page));
-  }
-  return { bytes: Buffer.from(await output.save()), filename: 'savi-merged.pdf', mimeType: 'application/pdf', mediaType: 'document' };
-}
-
-async function createPagePlanPdf(file: File, pagePlan: PagePlanItem[], mode: 'organize' | 'split'): Promise<PdfOutput> {
-  const source = await PDFDocument.load(await file.arrayBuffer(), { ignoreEncryption: true });
-  const output = await PDFDocument.create();
-  const pageCount = source.getPageCount();
-  let safePlan = pagePlan.filter((item) => item.pageNumber >= 1 && item.pageNumber <= pageCount);
-  if (!safePlan.length && mode === 'organize') {
-    safePlan = Array.from({ length: pageCount }, (_, index) => ({ pageNumber: index + 1, rotation: 0 }));
-  }
-  if (!safePlan.length) throw new PdfInputError(mode === 'split' ? 'Select at least one page to export.' : 'No pages are available to export.');
-  if (safePlan.length > MAX_TOTAL_PAGES) throw new PdfInputError(`Export up to ${MAX_TOTAL_PAGES} pages at a time.`);
-  for (const item of safePlan) {
-    const [copiedPage] = await output.copyPages(source, [item.pageNumber - 1]);
-    copiedPage.setRotation(degrees(normaliseRotation(item.rotation)));
-    output.addPage(copiedPage);
-  }
-  const suffix = mode === 'split' ? 'selected-pages' : 'organized';
-  return {
-    bytes: Buffer.from(await output.save()),
-    filename: `${sanitizeFileName(file.name)}-${suffix}.pdf`,
-    mimeType: 'application/pdf',
-    mediaType: 'document'
-  };
-}
-
 async function createJpgZip(file: File, pageRange: string | null): Promise<PdfOutput> {
-  return withTempDir('savi-pdf-jpg-', async (dir) => {
-    const inputPath = path.join(dir, `${sanitizeFileName(file.name)}.pdf`);
-    await writeFormFile(file, inputPath);
-    const pageCount = await getPdfPageCount(inputPath);
-    const pages = parsePageRange(pageRange, pageCount);
-    if (!pages.length) throw new PdfInputError('Select at least one PDF page.');
-    if (pages.length > MAX_JPG_OUTPUT_PAGES) throw new PdfInputError(`Convert up to ${MAX_JPG_OUTPUT_PAGES} pages to JPG at once.`);
-    const zip = new JSZip();
-    const outDir = path.join(dir, 'jpg');
-    await mkdir(outDir);
-    for (const page of pages) {
-      const prefix = path.join(outDir, `page-${String(page).padStart(3, '0')}`);
-      await runCommand('pdftoppm', ['-jpeg', '-r', '180', '-f', String(page), '-l', String(page), inputPath, prefix]);
-      const produced = (await readdir(outDir))
-        .filter((name) => name.startsWith(`page-${String(page).padStart(3, '0')}-`) && name.endsWith('.jpg'))
-        .sort()
-        .at(0);
-      if (produced) zip.file(`savi-page-${String(page).padStart(3, '0')}.jpg`, await readFile(path.join(outDir, produced)));
-    }
-    const bytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-    return { bytes, filename: `${sanitizeFileName(file.name)}-jpg-pages.zip`, mimeType: 'application/zip', mediaType: 'archive' };
-  });
+  const source = await PDFDocument.load(await file.arrayBuffer());
+  const pages = parsePageRange(pageRange, source.getPageCount());
+  if (!pages.length) throw new PdfInputError('Select at least one PDF page.');
+  if (pages.length > MAX_JPG_OUTPUT_PAGES) throw new PdfInputError(`Convert up to ${MAX_JPG_OUTPUT_PAGES} pages to JPG at once.`);
+
+  // iLoveAPI converts every page in the supplied PDF. Building a local subset
+  // preserves the user's page selection without adding another provider call.
+  const selectedPdf = await createPagePlanPdf(file, pages.map((pageNumber) => ({ pageNumber })), 'split');
+  try {
+    return await convertPdfToJpg({ bytes: selectedPdf.bytes, filename: file.name });
+  } catch (error) {
+    const mapped = mapIlovePdfError(error);
+    const failure = new SaviInfrastructureError(mapped.category, mapped.status, mapped.message, mapped.providerRequestId);
+    throw failure;
+  }
 }
 
 async function createExtractedImagesZip(file: File): Promise<PdfOutput> {
@@ -205,7 +163,7 @@ async function createExtractedImagesZip(file: File): Promise<PdfOutput> {
 async function processPdf(action: PdfAction, files: File[], form: FormData): Promise<PdfOutput> {
   if (action === 'merge_pdf') {
     if (files.length < 2) throw new PdfInputError('Upload at least two PDFs to merge.');
-    return createMergedPdf(files);
+    return mergePdfFiles(files);
   }
   const file = files[0];
   if (action === 'organize_pdf' || action === 'split_pdf') {
@@ -249,15 +207,15 @@ export async function POST(request: NextRequest) {
       user: session,
       clientRequestId,
       toolId: action,
-      provider: SAVI_LOCAL_PDF_PROVIDER,
-      model: SAVI_LOCAL_PDF_MODEL,
+      provider: action === 'pdf_to_jpg' ? SAVI_ILOVEPDF_PROVIDER : SAVI_LOCAL_PDF_PROVIDER,
+      model: action === 'pdf_to_jpg' ? SAVI_ILOVEPDF_PDF_TO_JPG_MODEL : SAVI_LOCAL_PDF_MODEL,
       operation: 'document_local',
       pricingInput: { pageCount },
       pricingOutput: {},
       mediaType: action === 'pdf_to_jpg' || action === 'extract_images' ? 'archive' : 'document',
       generate: async () => {
         const output = await processPdf(action, files, form);
-        return { ...output, metadata: { pageCount, processing: 'local_pdf' } };
+        return { ...output, metadata: { pageCount, processing: action === 'pdf_to_jpg' ? 'ilovepdf_eu' : 'local_pdf' } };
       }
     });
     if (result.state === 'processing') {

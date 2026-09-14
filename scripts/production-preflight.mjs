@@ -81,7 +81,7 @@ for (const [name, value] of Object.entries(requiredValues)) {
   if (env.get(name)?.type !== 'value' || env.get(name)?.value !== value) fail(`${name} is not an exact production value.`);
 }
 
-for (const name of ['GOOGLE_CLIENT_SECRET', 'SAVI_AUTH_SECRET', 'GEMINI_API_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET']) {
+for (const name of ['GOOGLE_CLIENT_SECRET', 'SAVI_AUTH_SECRET', 'GEMINI_API_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'ILOVEPDF_PUBLIC_KEY', 'ILOVEPDF_SECRET_KEY']) {
   if (env.get(name)?.type !== 'secret' || env.get(name)?.value !== name) fail(`${name} is not a name-only Secret Manager reference.`);
 }
 

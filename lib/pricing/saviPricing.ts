@@ -23,6 +23,8 @@ export const SAVI_TTS_DEFAULT_MODEL = 'gemini-3.1-flash-tts-preview' as const;
 export const SAVI_VIDEO_DEFAULT_MODEL = 'gemini-omni-flash-preview' as const;
 export const SAVI_LOCAL_PDF_PROVIDER = 'savi_local' as const;
 export const SAVI_LOCAL_PDF_MODEL = 'pdf-lib-poppler-v1' as const;
+export const SAVI_ILOVEPDF_PROVIDER = 'ilovepdf' as const;
+export const SAVI_ILOVEPDF_PDF_TO_JPG_MODEL = 'pdfjpg-eu-v1' as const;
 const SAVI_VOICE_RESERVATION_CHARACTERS_PER_SECOND = 10;
 const SAVI_VOICE_MAX_RESERVATION_SECONDS = 1_200;
 
@@ -1280,7 +1282,9 @@ const LOCAL_PDF_CREDITS: Record<string, number> = {
 };
 
 function quoteLocalPdfTool(request: SaviPricingRequest): SaviPricingQuote {
-  if (request.provider !== SAVI_LOCAL_PDF_PROVIDER || request.model !== SAVI_LOCAL_PDF_MODEL || request.operation !== 'document_local' || !hasId(SAVI_LOCAL_PDF_TOOL_IDS, request.toolId)) {
+  const localOperation = request.provider === SAVI_LOCAL_PDF_PROVIDER && request.model === SAVI_LOCAL_PDF_MODEL;
+  const ilovePdfOperation = request.toolId === 'pdf_to_jpg' && request.provider === SAVI_ILOVEPDF_PROVIDER && request.model === SAVI_ILOVEPDF_PDF_TO_JPG_MODEL;
+  if ((!localOperation && !ilovePdfOperation) || request.operation !== 'document_local' || !hasId(SAVI_LOCAL_PDF_TOOL_IDS, request.toolId)) {
     throw new SaviPricingError('PRICING_NOT_CONFIGURED', 503, 'This local PDF operation does not have a valid pricing rule.');
   }
   const pageCount = assertWholeNumber(request.input?.pageCount, 0, 'PDF page count');
