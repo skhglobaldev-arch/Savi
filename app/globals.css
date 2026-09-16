@@ -160,10 +160,12 @@ input, textarea, select {
 
 .savi-compare-reveal {
   clip-path: inset(0 68% 0 0);
+  animation: savi-compare-reveal 4.8s ease-in-out infinite;
 }
 
 .savi-compare-handle {
   left: 32%;
+  animation: savi-compare-handle 4.8s ease-in-out infinite;
 }
 
 @keyframes savi-audio-wave {
