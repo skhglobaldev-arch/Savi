@@ -114,11 +114,11 @@ function buildVideoPrompt(body: Required<Pick<VideoRequest, 'prompt' | 'toolId' 
             ? 'Create a polished product advertisement with one clear product story and clean readable composition.'
             : body.toolId === 'social_reel'
               ? 'Create a concise, high-energy social reel with clear visual beats and no unreadable on-screen text.'
-              : 'Create one polished, premium SAVI video with a clear visual idea.';
+              : 'Create one polished, premium video with a clear visual idea.';
 
   return [
     `Create a ${body.duration}-second video in ${body.ratio}.`,
-    'Use the current SAVI Omni 720p output path.',
+    'Do not add product names, logos, watermarks, signatures, creator names, or visible branding unless the user explicitly requests them.',
     toolInstruction,
     audioNote,
     '',
@@ -241,7 +241,7 @@ async function generateVideo(body: VideoRequest, validated: ReturnType<typeof va
   if (!VIDEO_MIME_TYPES.has(mimeType)) mimeType = 'video/mp4';
   return {
     bytes,
-    filename: `savi-generated-video.${mimeType === 'video/webm' ? 'webm' : 'mp4'}`,
+    filename: `generated-video.${mimeType === 'video/webm' ? 'webm' : 'mp4'}`,
     mimeType,
     mediaType: 'video' as const,
     providerRequestId,

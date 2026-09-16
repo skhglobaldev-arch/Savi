@@ -604,7 +604,7 @@ export function FileToolsStudio({
         title: selectedTool.title,
         source: 'Files',
         url: data.asset,
-        filename: data.filename || `savi-${activeTool}.txt`,
+        filename: data.filename || `${activeTool}.txt`,
         text: resultText
       });
       applyAuthoritativeBalance(data.availableCredits, onCreditsChange);
@@ -658,13 +658,13 @@ export function FileToolsStudio({
       }
 
       setPodcastAudioUrl(data.audio);
-      setPodcastAudioName(data.filename || 'savi-radio-podcast.wav');
+      setPodcastAudioName(data.filename || 'radio-podcast.wav');
       recordMediaItem({
         type: 'audio',
         title: 'PDF radio podcast',
         source: 'Files',
         url: data.audio,
-        filename: data.filename || 'savi-radio-podcast.wav',
+        filename: data.filename || 'radio-podcast.wav',
         text: aiResult
       });
       applyAuthoritativeBalance(data.availableCredits, onCreditsChange);
@@ -742,7 +742,7 @@ export function FileToolsStudio({
         throw new Error(data.error || 'PDF tool failed.');
       }
 
-      const filename = data.filename || (action.includes('jpg') || action.includes('images') ? 'savi-output.zip' : 'savi-output.pdf');
+      const filename = data.filename || (action.includes('jpg') || action.includes('images') ? 'output.zip' : 'output.pdf');
       const url = data.asset;
       setOutput({
         url,
@@ -1198,7 +1198,7 @@ export function FileToolsStudio({
                   const url = URL.createObjectURL(blob);
                   const anchor = document.createElement('a');
                   anchor.href = url;
-                  anchor.download = `savi-${activeTool}.txt`;
+                  anchor.download = `${activeTool}.txt`;
                   anchor.click();
                   URL.revokeObjectURL(url);
                 }}
@@ -1237,7 +1237,7 @@ export function FileToolsStudio({
                       <p className="text-xs font-bold text-slate-500">{podcastAudioName}</p>
                       <a
                         href={podcastAudioUrl}
-                        download={podcastAudioName || 'savi-radio-podcast.wav'}
+                        download={podcastAudioName || 'radio-podcast.wav'}
                         className="rounded-full bg-slate-950 px-5 py-3 text-sm font-black text-white"
                       >
                         Download podcast

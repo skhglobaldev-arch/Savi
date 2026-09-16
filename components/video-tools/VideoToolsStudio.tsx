@@ -492,7 +492,7 @@ export function VideoToolsStudio({
       }
 
       const resultVideo = data.video;
-      const resultFilename = data.filename || 'savi-generated-video.mp4';
+      const resultFilename = data.filename || 'generated-video.mp4';
       setVideoUrl(resultVideo);
       setVideoName(resultFilename);
       setOutputBrief(brief);
@@ -668,7 +668,7 @@ export function VideoToolsStudio({
         throw new Error(data.error || 'Story video shot generation failed.');
       }
       const resultVideo = data.video;
-      const resultFilename = data.filename || 'savi-story-video-shot.mp4';
+      const resultFilename = data.filename || 'story-video-shot.mp4';
 
       updateStoryVideoShot(id, {
         videoUrl: resultVideo,
@@ -821,7 +821,7 @@ export function VideoToolsStudio({
                       {hasGeneratedVideo && (
                         <>
                           <button type="button" onClick={() => addFollowUpVideoShot(shot.id)} className="mini-tool-button">Next shot</button>
-                          <a href={shot.videoUrl} download={shot.videoName || `savi-story-video-shot-${index + 1}.mp4`} className="mini-tool-button">
+                          <a href={shot.videoUrl} download={shot.videoName || `story-video-shot-${index + 1}.mp4`} className="mini-tool-button">
                             Download
                           </a>
                         </>
@@ -1000,7 +1000,7 @@ export function VideoToolsStudio({
                   title={`${selectedTool.title} outputs`}
                   items={videoOutputs.filter((item) => item.toolId === selectedTool.id)}
                   actions={outputBrief ? (
-                    <button type="button" onClick={() => makeDownload('savi-video-brief.txt', outputBrief)} className="rounded-full border border-violet-200 bg-white px-4 py-2 text-xs font-black text-slate-800">
+                    <button type="button" onClick={() => makeDownload('video-brief.txt', outputBrief)} className="rounded-full border border-violet-200 bg-white px-4 py-2 text-xs font-black text-slate-800">
                       Download brief
                     </button>
                   ) : undefined}

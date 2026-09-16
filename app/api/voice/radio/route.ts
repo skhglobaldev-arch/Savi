@@ -166,7 +166,7 @@ async function generateAudio(input: { script: string; voice: string; style: stri
   const actualSeconds = wavDurationSeconds(wav);
   return {
     bytes: wav,
-    filename: input.toolId === 'radio_talk' ? 'savi-radio-talk.wav' : 'savi-text-to-speech.wav',
+    filename: input.toolId === 'radio_talk' ? 'radio-talk.wav' : 'text-to-speech.wav',
     mimeType: 'audio/wav',
     mediaType: 'audio' as const,
     providerRequestId,

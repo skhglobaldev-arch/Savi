@@ -245,13 +245,13 @@ export function VoiceToolsStudio({
 
       setResult(nextResult);
       setAudioUrl(data.audio);
-      setAudioName(data.filename || (mode === 'radio' ? 'savi-radio-talk.wav' : 'savi-text-to-speech.wav'));
+      setAudioName(data.filename || (mode === 'radio' ? 'radio-talk.wav' : 'text-to-speech.wav'));
       recordMediaItem({
         type: 'audio',
         title: mode === 'radio' ? 'Radio Talk AI' : 'Text to Speech',
         source: 'Voice',
         url: data.audio,
-        filename: data.filename || (mode === 'radio' ? 'savi-radio-talk.wav' : 'savi-text-to-speech.wav'),
+        filename: data.filename || (mode === 'radio' ? 'radio-talk.wav' : 'text-to-speech.wav'),
         text: nextResult
       });
       applyAuthoritativeBalance(data.availableCredits, onCreditsChange);
@@ -421,11 +421,11 @@ export function VoiceToolsStudio({
             </div>
             {result && (
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => downloadText(mode === 'radio' ? 'savi-radio-script.txt' : 'savi-tts-script.txt', result)} className="inline-flex min-h-[44px] items-center rounded-lg border border-violet-200 bg-white px-5 py-3 text-sm font-black text-slate-800">
+                <button type="button" onClick={() => downloadText(mode === 'radio' ? 'radio-script.txt' : 'text-to-speech-script.txt', result)} className="inline-flex min-h-[44px] items-center rounded-lg border border-violet-200 bg-white px-5 py-3 text-sm font-black text-slate-800">
                   Download script
                 </button>
                 {audioUrl && (
-                    <a href={audioUrl} download={audioName || 'savi-voice.wav'} className="inline-flex min-h-[44px] items-center rounded-lg bg-slate-950 px-5 py-3 text-sm font-black text-white">
+                    <a href={audioUrl} download={audioName || 'generated-voice.wav'} className="inline-flex min-h-[44px] items-center rounded-lg bg-slate-950 px-5 py-3 text-sm font-black text-white">
                     Download audio
                   </a>
                 )}
@@ -437,7 +437,7 @@ export function VoiceToolsStudio({
             <div className="mt-4 rounded-[22px] border border-violet-100 bg-violet-50/80 p-4">
               <audio controls src={audioUrl} className="w-full" />
               <p className="mt-2 text-xs font-bold text-slate-500">
-                {audioName || 'savi-voice.wav'}
+                {audioName || 'generated-voice.wav'}
               </p>
             </div>
           )}

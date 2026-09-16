@@ -30,7 +30,7 @@ export async function mergePdfFiles(files: File[]): Promise<LocalPdfOutput> {
     const copiedPages = await output.copyPages(source, source.getPageIndices());
     copiedPages.forEach((page) => output.addPage(page));
   }
-  return { bytes: Buffer.from(await output.save()), filename: 'savi-merged.pdf', mimeType: 'application/pdf', mediaType: 'document' };
+  return { bytes: Buffer.from(await output.save()), filename: 'merged.pdf', mimeType: 'application/pdf', mediaType: 'document' };
 }
 
 export async function createPagePlanPdf(file: File, pagePlan: Array<{ pageNumber: number; rotation?: number }>, mode: 'organize' | 'split'): Promise<LocalPdfOutput> {

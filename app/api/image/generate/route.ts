@@ -145,8 +145,9 @@ function buildPrompt({ prompt, toolId, style, referenceImage, referenceImages }:
     : 'No reference image name.';
 
   return [
-    'You are SAVI image studio.',
+    'You are a professional image generation system.',
     toolInstruction,
+    'Do not add product names, logos, watermarks, signatures, creator names, or visible branding unless the user explicitly requests them.',
     `Style direction: ${style || 'Premium, clean, useful'}.`,
     referenceSummary,
     '',
@@ -286,7 +287,7 @@ async function generateImageOutput(body: ImageRequest): Promise<GeneratedImageOu
   const extension = imageData.mimeType.includes('jpeg') || imageData.mimeType.includes('jpg') ? 'jpg' : 'png';
   return {
     image: `data:${imageData.mimeType};base64,${imageData.data}`,
-    filename: `savi-generated-image.${extension}`,
+    filename: `generated-image.${extension}`,
     mimeType: imageData.mimeType,
     mode: 'gemini',
     providerRequestId,

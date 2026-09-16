@@ -131,12 +131,12 @@ export function AllMediaLibrary() {
               </div>
               <div className="flex items-center gap-2">
                 {activeItem.url && (
-                  <a href={activeItem.url} download={activeItem.filename || 'savi-output'} className="inline-flex min-h-[44px] items-center rounded-lg bg-white px-4 py-2 text-xs font-bold text-black">
+                  <a href={activeItem.url} download={activeItem.filename || 'output'} className="inline-flex min-h-[44px] items-center rounded-lg bg-white px-4 py-2 text-xs font-bold text-black">
                     Download
                   </a>
                 )}
                 {activeItem.text && (
-                  <button type="button" onClick={() => downloadText(activeItem.filename || 'savi-output.txt', activeItem.text || '')} className="min-h-[44px] rounded-lg bg-white px-4 py-2 text-xs font-bold text-black">
+                  <button type="button" onClick={() => downloadText(activeItem.filename || 'output.txt', activeItem.text || '')} className="min-h-[44px] rounded-lg bg-white px-4 py-2 text-xs font-bold text-black">
                     Download
                   </button>
                 )}

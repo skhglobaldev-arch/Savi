@@ -69,7 +69,7 @@ export function OutputGallery({
                   </div>
                   <a
                     href={item.url}
-                    download={item.filename || 'savi-output'}
+                    download={item.filename || 'output'}
                     className="inline-flex min-h-[44px] shrink-0 items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-black text-black"
                     onClick={(event) => event.stopPropagation()}
                   >
@@ -97,7 +97,7 @@ export function OutputGallery({
                 {activeItem.subtitle && <p className="mt-0.5 truncate text-xs font-bold text-white/48">{activeItem.subtitle}</p>}
               </div>
               <div className="flex items-center gap-2">
-                <a href={activeItem.url} download={activeItem.filename || 'savi-output'} className="inline-flex min-h-[44px] items-center rounded-lg bg-white px-4 py-2 text-xs font-black text-black">
+                <a href={activeItem.url} download={activeItem.filename || 'output'} className="inline-flex min-h-[44px] items-center rounded-lg bg-white px-4 py-2 text-xs font-black text-black">
                   Download
                 </a>
                 <button type="button" onClick={() => setActiveItem(null)} className="grid h-[44px] w-[44px] place-items-center rounded-lg border border-white/15 text-lg font-light text-white hover:bg-white/10" aria-label="Close output preview">

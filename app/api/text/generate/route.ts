@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
         generatedText = output.result;
         return {
           bytes: Buffer.from(output.result, 'utf8'),
-          filename: `${body.toolId === 'instagram_post' ? 'savi-instagram-post' : 'savi-product-photo-prompt'}.txt`,
+          filename: `${body.toolId === 'instagram_post' ? 'instagram-post' : 'product-photo-prompt'}.txt`,
           mimeType: 'text/plain',
           mediaType: 'text',
           providerRequestId: output.providerRequestId,

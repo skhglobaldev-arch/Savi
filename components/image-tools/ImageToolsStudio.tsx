@@ -462,7 +462,7 @@ function createSketchResult(updates: Partial<SketchResult> = {}): SketchResult {
   return {
     id: makeClientId(),
     dataUrl: '',
-    filename: 'savi-sketch-image.png',
+    filename: 'sketch-image.png',
     sketchDataUrl: '',
     prompt: '',
     status: 'loading',
@@ -870,7 +870,7 @@ export function ImageToolsStudio({
           referenceImage: {
             data: sketchBase64,
             mimeType: 'image/png',
-            name: 'savi-sketch-canvas.png'
+            name: 'sketch-canvas.png'
           }
         })
       });
@@ -898,7 +898,7 @@ export function ImageToolsStudio({
             ? {
                 ...item,
                 dataUrl: resultImage,
-                filename: data.filename || 'savi-sketch-image.png',
+                filename: data.filename || 'sketch-image.png',
                 status: 'ready'
               }
             : item
@@ -909,7 +909,7 @@ export function ImageToolsStudio({
         title: 'Sketch to image',
         source: 'Images',
         url: resultImage,
-        filename: data.filename || 'savi-sketch-image.png'
+        filename: data.filename || 'sketch-image.png'
       });
       updateServerBalance(data);
     } catch (sketchError) {
@@ -1023,14 +1023,14 @@ export function ImageToolsStudio({
         if (!resultText) throw new Error('SAVI could not load the text result.');
         setOutputBrief(resultText);
         setGeneratedImageUrl('');
-        setGeneratedImageName(data.filename || `savi-${selectedTool.id}.txt`);
+        setGeneratedImageName(data.filename || `${selectedTool.id}-result.txt`);
         setGenerationMode('text');
         recordMediaItem({
           type: 'text',
           title: selectedTool.title,
           source: 'Images',
           url: data.asset,
-          filename: data.filename || `savi-${selectedTool.id}.txt`,
+          filename: data.filename || `${selectedTool.id}-result.txt`,
           text: resultText
         });
         updateServerBalance(data);
@@ -1039,11 +1039,11 @@ export function ImageToolsStudio({
       }
 
       const resultImage = data.image as string;
-      const resultFilename = data.filename || 'savi-generated-image.png';
+      const resultFilename = data.filename || 'generated-image.png';
 
       const brief = [
       `Tool: ${selectedTool.title}`,
-      'Rendering path: SAVI Image',
+      'Rendering path: image generation',
       `User request: ${prompt.trim() || selectedTool.title}`,
       `Image input: ${imageName || 'No reference image'}`,
       `Aspect ratio: ${aspectRatio}`,
@@ -1178,12 +1178,12 @@ export function ImageToolsStudio({
         throw new Error(data.error || 'Mockup generation failed.');
       }
       const resultImage = data.image;
-      const resultFilename = data.filename || 'savi-mockup.png';
+      const resultFilename = data.filename || 'mockup.png';
 
       const brief = [
         `Tool: Mockup`,
         `Preset: ${selectedMockupPreset.label}`,
-        'Rendering path: SAVI Image',
+        'Rendering path: image generation',
         `Design input: ${mockupDesignName}`,
         `Surface input: ${mockupSurfaceName || 'Preset-generated surface'}`,
         `Quality: ${quality}`,
@@ -1282,7 +1282,7 @@ export function ImageToolsStudio({
       {
         id: resultId,
         dataUrl: '',
-        filename: 'savi-visual-mixer.png',
+        filename: 'visual-mixer.png',
         prompt: visualMixerPrompt.trim() || briefLines.join(' · ') || 'Visual mixer image',
         status: 'loading'
       },
@@ -1338,7 +1338,7 @@ export function ImageToolsStudio({
             ? {
                 ...item,
                 dataUrl: resultImage,
-                filename: data.filename || 'savi-visual-mixer.png',
+                filename: data.filename || 'visual-mixer.png',
                 status: 'ready'
               }
             : item
@@ -1349,7 +1349,7 @@ export function ImageToolsStudio({
         title: 'Visual mixer',
         source: 'Images',
         url: resultImage,
-        filename: data.filename || 'savi-visual-mixer.png'
+        filename: data.filename || 'visual-mixer.png'
       });
       updateServerBalance(data);
     } catch (mixerError) {
@@ -1479,7 +1479,7 @@ export function ImageToolsStudio({
         throw new Error(data.error || 'Story shot generation failed.');
       }
       const resultImage = data.image;
-      const resultFilename = data.filename || 'savi-story-shot.png';
+      const resultFilename = data.filename || 'story-shot.png';
 
       updateStoryShot(id, {
         imageUrl: resultImage,
@@ -1606,7 +1606,7 @@ export function ImageToolsStudio({
                       {hasGeneratedImage && (
                         <>
                           <button type="button" onClick={() => addFollowUpShot(shot.id)} className="mini-tool-button">Next shot</button>
-                          <a href={shot.imageUrl} download={shot.imageName || `savi-story-shot-${index + 1}.png`} className="mini-tool-button">
+                          <a href={shot.imageUrl} download={shot.imageName || `story-shot-${index + 1}.png`} className="mini-tool-button">
                             Download
                           </a>
                         </>
@@ -1798,7 +1798,7 @@ export function ImageToolsStudio({
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-500">SAVI Image result</p>
+                      <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-500">Image result</p>
                       <p className="mt-1 line-clamp-2 text-sm font-bold text-slate-700">{item.prompt || 'Polished image from sketch'}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -2127,7 +2127,7 @@ export function ImageToolsStudio({
               title="Mockup outputs"
               items={imageOutputs.filter((item) => item.toolId === 'mockup')}
               actions={outputBrief ? (
-                <button type="button" onClick={() => makeDownload('savi-mockup-brief.txt', outputBrief)} className="rounded-full border border-violet-200 bg-white px-4 py-2 text-xs font-black text-slate-800">
+                <button type="button" onClick={() => makeDownload('mockup-brief.txt', outputBrief)} className="rounded-full border border-violet-200 bg-white px-4 py-2 text-xs font-black text-slate-800">
                   Download brief
                 </button>
               ) : undefined}
@@ -2254,7 +2254,7 @@ export function ImageToolsStudio({
             {!imageOutputs.some((item) => item.toolId === selectedTool.id) && !outputBrief && (
               <ToolResultEmpty>
                 {textOnlyImageTools.has(selectedTool.id)
-                  ? 'Your SAVI text result will appear here after you create it.'
+                  ? 'Your text result will appear here after you create it.'
                   : 'Your generated image will appear here after you create it.'}
               </ToolResultEmpty>
             )}
@@ -2262,7 +2262,7 @@ export function ImageToolsStudio({
             {textOnlyImageTools.has(selectedTool.id) && outputBrief && (
               <div className="rounded-[24px] border border-violet-100 bg-white/75 p-4">
                 <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap text-sm leading-6 text-slate-700">{outputBrief}</pre>
-                <button type="button" onClick={() => makeDownload(generatedImageName || `savi-${selectedTool.id}.txt`, outputBrief)} className="mt-3 rounded-full border border-violet-200 bg-white px-4 py-2 text-xs font-black text-slate-800">
+                <button type="button" onClick={() => makeDownload(generatedImageName || `${selectedTool.id}-result.txt`, outputBrief)} className="mt-3 rounded-full border border-violet-200 bg-white px-4 py-2 text-xs font-black text-slate-800">
                   Download text
                 </button>
               </div>
@@ -2273,7 +2273,7 @@ export function ImageToolsStudio({
                 title={`${selectedTool.title} outputs`}
                 items={imageOutputs.filter((item) => item.toolId === selectedTool.id)}
                 actions={outputBrief ? (
-                  <button type="button" onClick={() => makeDownload('savi-image-brief.txt', outputBrief)} className="rounded-full border border-violet-200 bg-white px-4 py-2 text-xs font-black text-slate-800">
+                  <button type="button" onClick={() => makeDownload('image-brief.txt', outputBrief)} className="rounded-full border border-violet-200 bg-white px-4 py-2 text-xs font-black text-slate-800">
                     Download brief
                   </button>
                 ) : undefined}

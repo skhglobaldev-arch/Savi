@@ -219,6 +219,10 @@ function localizedText(language: 'fa' | 'en', fa: string, en: string) {
   return language === 'fa' ? fa : en;
 }
 
+function isUploadQuickReply(reply: string) {
+  return /\b(upload|attach|choose|select)\b|آپلود|ارسال|انتخاب|بارگذاری/i.test(reply);
+}
+
 function voiceScriptForAction(action: PendingAction) {
   if (action.tool !== 'radio_talk' || action.radioSource === 'script') return action.prompt.trim();
   return createSaviRadioScript(action.prompt, 'solo', 'short');
@@ -1818,7 +1822,7 @@ export function AskSaviChat({
             throw new Error(data.error || 'PDF processing failed.');
           }
           const fileNames: Record<string, string> = {
-            merge_pdf: 'savi-merged.pdf',
+            merge_pdf: 'merged.pdf',
             pdf_to_jpg: `${pdf.name.replace(/\.pdf$/i, '')}-jpg-pages.zip`,
             extract_images: `${pdf.name.replace(/\.pdf$/i, '')}-images.zip`
           };
@@ -1826,7 +1830,7 @@ export function AskSaviChat({
           result = {
             type: 'file',
             url: data.asset,
-            filename: data.filename || fileNames[action.toolId] || 'savi-file-output.zip',
+            filename: data.filename || fileNames[action.toolId] || 'file-output.zip',
             helper: localizedText(action.language || userLanguage(action.prompt), 'فایل آماده دانلود است.', 'Your file is ready to download.')
           };
         } else if (action.toolId === 'organize_pdf') {
@@ -1880,7 +1884,7 @@ export function AskSaviChat({
             type: 'text',
             text: documentText,
             url: data.asset,
-            filename: data.filename || `savi-${action.toolId}.txt`,
+            filename: data.filename || `${action.toolId}-result.txt`,
             helper: localizedText(action.language || userLanguage(action.prompt), 'نتیجه سند آماده است.', 'Document result ready.')
           };
         }
@@ -1895,7 +1899,7 @@ export function AskSaviChat({
             toolId: action.toolId,
             aspectRatio: action.aspectRatio || '1:1',
             quality: action.quality || '1080',
-            style: 'Premium realistic SAVI edit, preserve original image where requested',
+            style: 'Premium realistic edit, preserve original image where requested',
             clientRequestId: paidRequestId(),
             referenceImages: imageAttachments.map((item) => ({
               data: item.base64,
@@ -1911,7 +1915,7 @@ export function AskSaviChat({
         result = {
           type: 'image',
           url: data.image,
-          filename: data.filename || 'savi-edited-image.png',
+          filename: data.filename || 'edited-image.png',
           helper: 'Image output ready.'
         };
       } else if (action.tool === 'video_studio' && action.toolId) {
@@ -1941,7 +1945,7 @@ export function AskSaviChat({
         result = {
           type: 'video',
           url: data.video,
-          filename: data.filename || 'savi-video.mp4',
+          filename: data.filename || 'generated-video.mp4',
           helper: 'Video ready.'
         };
       } else if (action.tool === 'image_text') {
@@ -1965,7 +1969,7 @@ export function AskSaviChat({
                   toolId: action.agentToolId || 'text_to_image',
                   aspectRatio: action.aspectRatio || '1:1',
                   quality: action.quality || '1080',
-                  style: 'Realistic premium SAVI image',
+                  style: 'Realistic premium image',
                   clientRequestId: paidRequestId()
                 }
           )
@@ -1979,13 +1983,13 @@ export function AskSaviChat({
               type: 'text',
               text: data.result || await readPrivateTextAsset(data.asset),
               url: data.asset,
-              filename: data.filename || `savi-${action.agentToolId}.txt`,
+              filename: data.filename || `${action.agentToolId}-result.txt`,
               helper: 'Text output ready.'
             }
           : {
               type: 'image',
               url: data.image,
-              filename: data.filename || 'savi-chat-image.png',
+              filename: data.filename || 'generated-image.png',
               helper: 'Image ready.'
             };
       } else if (action.tool === 'voice_tts') {
@@ -2008,7 +2012,7 @@ export function AskSaviChat({
           type: 'audio',
           text: action.prompt,
           url: data.audio,
-          filename: data.filename || 'savi-text-to-speech.wav',
+          filename: data.filename || 'text-to-speech.wav',
           helper: 'Audio ready.'
         };
       } else if (action.tool === 'radio_talk') {
@@ -2034,7 +2038,7 @@ export function AskSaviChat({
           type: 'audio',
           text: script,
           url: audioData.audio,
-          filename: audioData.filename || 'savi-radio-talk.wav',
+          filename: audioData.filename || 'radio-talk.wav',
           helper: 'Radio podcast ready.'
         };
       } else {
@@ -2053,7 +2057,7 @@ export function AskSaviChat({
         result = {
           type: 'text',
           text: data.response,
-          filename: `savi-${action.tool}.txt`,
+          filename: `${action.tool}-result.txt`,
           helper: 'Output ready.'
         };
       }
@@ -2175,6 +2179,16 @@ export function AskSaviChat({
     });
   }
 
+  function handleQuickReply(reply: string, pendingAction?: PendingAction) {
+    const uploadAction = pendingAction ?? pendingUploadActionRef.current;
+    if (uploadAction?.requiredInput && uploadAction.requiredInput !== 'none' && isUploadQuickReply(reply)) {
+      pendingUploadActionRef.current = uploadAction;
+      fileInputRef.current?.click();
+      return;
+    }
+    void submitText(reply);
+  }
+
   return (
     <section className="relative min-h-[calc(100vh-64px)] overflow-hidden bg-transparent lg:min-h-screen">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-violet-500/[0.055] to-transparent" />
@@ -2206,7 +2220,7 @@ export function AskSaviChat({
                       <h1 dir={direction} className="mt-3 text-4xl font-semibold leading-[1.08] text-white md:text-6xl">Ask. Create. Organise.</h1>
                       <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-white/58">Bring an idea, a question, or a file. SAVI helps shape the next useful output.</p>
                     </div>
-                  ) : (
+                  ) : message.status === 'running' ? null : (
                     <div dir={direction} className="whitespace-pre-wrap text-[15px] leading-8 md:text-[16px]">{message.content}</div>
                   )}
 
@@ -2247,12 +2261,12 @@ export function AskSaviChat({
                   )}
 
                   {message.quickReplies && (
-                    <div className="mt-5 flex flex-wrap justify-center gap-2">
+                    <div dir={direction} className={`mt-5 flex flex-wrap gap-2 ${direction === 'rtl' ? 'justify-end' : 'justify-start'}`}>
                       {message.quickReplies.map((reply) => (
                         <button
                           key={reply}
                           type="button"
-                          onClick={() => void submitText(reply)}
+                          onClick={() => handleQuickReply(reply, message.pendingAction)}
                           className="rounded-full border border-white/10 bg-white/8 px-3 py-2 text-xs font-semibold text-white/66 hover:bg-white/14 hover:text-white"
                         >
                           {reply}
@@ -2262,7 +2276,7 @@ export function AskSaviChat({
                   )}
 
                   {!isUser && !isWelcome && !isError && (
-                    <div className={`mt-4 flex items-center gap-1 text-white/42 ${direction === 'rtl' ? 'justify-end' : 'justify-start'}`}>
+                    <div dir={direction} className={`mt-4 flex items-center gap-1 text-white/42 ${direction === 'rtl' ? 'justify-end' : 'justify-start'}`}>
                       <button type="button" onClick={() => navigator.clipboard?.writeText(message.content)} className="min-h-[44px] rounded-lg px-3 py-1 text-xs hover:bg-white/8 hover:text-white">Copy</button>
                     </div>
                   )}
@@ -2405,9 +2419,9 @@ function ChatResultView({ result }: { result: ChatResult }) {
   if (result.type === 'image') {
     return (
       <div className="mt-3 overflow-hidden rounded-[16px] border border-white/10 bg-black/24 p-2">
-        {result.url && <img src={result.url} alt="SAVI generated image" className="savi-output-media rounded-[14px]" />}
+        {result.url && <img src={result.url} alt="Generated image" className="savi-output-media rounded-[14px]" />}
         {result.url && (
-            <a href={result.url} download={result.filename || 'savi-image.png'} className="mt-2 inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+            <a href={result.url} download={result.filename || 'generated-image.png'} className="mt-2 inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
             Download image
           </a>
         )}
@@ -2422,12 +2436,12 @@ function ChatResultView({ result }: { result: ChatResult }) {
         {result.text && <pre className="mt-3 max-h-[220px] overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-white/56">{result.text}</pre>}
         <div className="mt-2 flex flex-wrap gap-2">
           {result.url && (
-            <a href={result.url} download={result.filename || 'savi-audio.wav'} className="inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+            <a href={result.url} download={result.filename || 'generated-audio.wav'} className="inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
               Download audio
             </a>
           )}
           {result.text && (
-            <button type="button" onClick={() => downloadText('savi-audio-script.txt', result.text || '')} className="min-h-[44px] rounded-lg border border-white/10 bg-white/8 px-3 py-1.5 text-[11px] font-semibold text-white/62">
+            <button type="button" onClick={() => downloadText('audio-script.txt', result.text || '')} className="min-h-[44px] rounded-lg border border-white/10 bg-white/8 px-3 py-1.5 text-[11px] font-semibold text-white/62">
               Download script
             </button>
           )}
@@ -2441,11 +2455,11 @@ function ChatResultView({ result }: { result: ChatResult }) {
       <div className="mt-3 rounded-[16px] border border-white/10 bg-black/24 p-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-white/82">{result.filename || 'savi-output.pdf'}</p>
+            <p className="text-sm font-semibold text-white/82">{result.filename || 'processed-file.pdf'}</p>
             <p className="mt-1 text-xs text-white/42">{result.helper || 'File ready.'}</p>
           </div>
           {result.url && (
-            <a href={result.url} download={result.filename || 'savi-output.pdf'} className="inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+            <a href={result.url} download={result.filename || 'processed-file.pdf'} className="inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
               Download PDF
             </a>
           )}
@@ -2458,7 +2472,7 @@ function ChatResultView({ result }: { result: ChatResult }) {
     <div className="mt-3 rounded-[16px] border border-white/10 bg-black/24 p-3">
       {result.url && <video controls src={result.url} className="savi-output-media rounded-[14px]" />}
       {result.url && (
-        <a href={result.url} download={result.filename || 'savi-video.mp4'} className="mt-2 inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
+        <a href={result.url} download={result.filename || 'generated-video.mp4'} className="mt-2 inline-flex min-h-[44px] items-center rounded-lg bg-white px-3 py-1.5 text-[11px] font-bold text-black">
           Download video
         </a>
       )}

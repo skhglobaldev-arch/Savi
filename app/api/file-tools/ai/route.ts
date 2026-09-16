@@ -185,7 +185,7 @@ export async function POST(request: NextRequest) {
         generatedText = output.result;
         return {
           bytes: Buffer.from(output.result, 'utf8'),
-          filename: `savi-${toolIdValue}.txt`,
+          filename: `${toolIdValue}.txt`,
           mimeType: 'text/plain',
           mediaType: 'text',
           providerRequestId: output.providerRequestId,
