@@ -44,23 +44,6 @@ export const voiceToolOptions = [
 
 const CLOSE_ACTIVE_TOOL_EVENT = 'savi-close-active-tool';
 
-const samples = [
-  'Turn your idea into a clear system people can actually use.',
-  'سلام، این یک نمونه صدای فارسی برای SAVI است.',
-  'Create a calm product intro for a premium AI workspace.',
-  'Read this paragraph with confidence, warmth, and a natural pace.'
-];
-
-function speak(text: string, tone: ToneId) {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const option = tones.find((item) => item.id === tone) ?? tones[0];
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = option.rate;
-  utterance.pitch = option.pitch;
-  window.speechSynthesis.speak(utterance);
-}
-
 function downloadText(filename: string, text: string) {
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -327,7 +310,7 @@ export function VoiceToolsStudio({
                   key={item.id}
                   type="button"
                   onClick={() => setVoice(item.id)}
-                  className={`rounded-2xl border px-3 py-3 text-left text-sm transition ${voice === item.id ? 'border-violet-300 bg-violet-100 text-violet-950' : 'border-violet-100 bg-white/65 text-slate-600 hover:bg-white'}`}
+                  className={`rounded-lg border px-3 py-3 text-left text-sm transition ${voice === item.id ? 'border-violet-300/45 bg-violet-500/15 text-white' : 'border-white/10 bg-white/[0.035] text-white/65 hover:border-white/20 hover:bg-white/[0.07] hover:text-white'}`}
                 >
                   <strong className="block">{item.name}</strong>
                   <span className="mt-1 block text-xs opacity-70">{item.feel}</span>
@@ -343,7 +326,7 @@ export function VoiceToolsStudio({
                   key={item.id}
                   type="button"
                   onClick={() => setTone(item.id)}
-                  className={`rounded-2xl border px-3 py-3 text-left text-sm transition ${tone === item.id ? 'border-blue-300 bg-blue-100 text-blue-950' : 'border-violet-100 bg-white/65 text-slate-600 hover:bg-white'}`}
+                  className={`rounded-lg border px-3 py-3 text-left text-sm transition ${tone === item.id ? 'border-violet-300/45 bg-violet-500/15 text-white' : 'border-white/10 bg-white/[0.035] text-white/65 hover:border-white/20 hover:bg-white/[0.07] hover:text-white'}`}
                 >
                   <strong className="block">{item.label}</strong>
                   <span className="mt-1 block text-xs opacity-70">{item.note}</span>
@@ -359,7 +342,7 @@ export function VoiceToolsStudio({
           <ControlGroup title="Radio format" value={radioFormats.find((item) => item.id === radioFormat)?.label ?? 'Solo host'}>
             <div className="grid gap-2 sm:grid-cols-2">
               {radioFormats.map((item) => (
-                <button key={item.id} type="button" onClick={() => setRadioFormat(item.id)} className={`rounded-2xl border px-4 py-3 text-left text-sm ${radioFormat === item.id ? 'border-violet-300 bg-violet-100 text-violet-950' : 'border-violet-100 bg-white/65 text-slate-600'}`}>
+                <button key={item.id} type="button" onClick={() => setRadioFormat(item.id)} className={`rounded-lg border px-4 py-3 text-left text-sm transition ${radioFormat === item.id ? 'border-violet-300/45 bg-violet-500/15 text-white' : 'border-white/10 bg-white/[0.035] text-white/65 hover:border-white/20 hover:bg-white/[0.07] hover:text-white'}`}>
                   <strong>{item.label}</strong>
                   <span className="mt-1 block text-xs opacity-70">{item.note}</span>
                 </button>
@@ -369,7 +352,7 @@ export function VoiceToolsStudio({
           <ControlGroup title="Length" value={`${selectedLength.label} - ${selectedLength.target}`}>
             <div className="grid gap-2 sm:grid-cols-3">
               {radioLengths.map((item) => (
-                <button key={item.id} type="button" onClick={() => setRadioLength(item.id)} className={`rounded-2xl border px-4 py-3 text-left text-sm ${radioLength === item.id ? 'border-blue-300 bg-blue-100 text-blue-950' : 'border-violet-100 bg-white/65 text-slate-600'}`}>
+                <button key={item.id} type="button" onClick={() => setRadioLength(item.id)} className={`rounded-lg border px-4 py-3 text-left text-sm transition ${radioLength === item.id ? 'border-violet-300/45 bg-violet-500/15 text-white' : 'border-white/10 bg-white/[0.035] text-white/65 hover:border-white/20 hover:bg-white/[0.07] hover:text-white'}`}>
                   <strong>{item.label}</strong>
                   <span className="mt-1 block text-xs opacity-70">{item.target}</span>
                 </button>
@@ -379,37 +362,20 @@ export function VoiceToolsStudio({
         </div>
       )}
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-[0.62fr_1fr]">
-        <div className="rounded-[26px] border border-violet-100 bg-white/65 p-4">
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-500">Voice samples</p>
-          <div className="mt-3 grid gap-2">
-            {samples.map((sample) => (
-              <button
-                key={sample}
-                type="button"
-                onClick={() => speak(sample, tone)}
-                className="min-h-[44px] rounded-lg border border-violet-100 bg-white/70 px-4 py-3 text-left text-sm font-bold text-slate-700 hover:border-violet-300"
-              >
-                Play sample
-                <span className="mt-1 block text-xs font-medium text-slate-500">{sample}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-[26px] border border-violet-100 bg-white/65 p-4">
+      <div className="mt-5">
+        <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-black uppercase tracking-[0.16em] text-violet-500">Output</p>
-              <p className="mt-1 text-sm text-slate-600">Audio and script appear here after generation.</p>
+              <p className="text-xs font-semibold text-violet-300/85">Output</p>
+              <p className="mt-1 text-sm text-white/55">Audio and script appear here after generation.</p>
             </div>
             {result && (
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => downloadText(mode === 'radio' ? 'radio-script.txt' : 'text-to-speech-script.txt', result)} className="inline-flex min-h-[44px] items-center rounded-lg border border-violet-200 bg-white px-5 py-3 text-sm font-black text-slate-800">
+                <button type="button" onClick={() => downloadText(mode === 'radio' ? 'radio-script.txt' : 'text-to-speech-script.txt', result)} className="savi-button savi-button-secondary">
                   Download script
                 </button>
                 {audioUrl && (
-                    <a href={audioUrl} download={audioName || 'generated-voice.wav'} className="inline-flex min-h-[44px] items-center rounded-lg bg-slate-950 px-5 py-3 text-sm font-black text-white">
+                    <a href={audioUrl} download={audioName || 'generated-voice.wav'} className="savi-button savi-button-primary">
                     Download audio
                   </a>
                 )}
@@ -418,14 +384,14 @@ export function VoiceToolsStudio({
           </div>
           {error && <div className="mt-4"><ToolStatus kind="error">{error}</ToolStatus></div>}
           {audioUrl && (
-            <div className="mt-4 rounded-[22px] border border-violet-100 bg-violet-50/80 p-4">
+            <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-4">
               <audio controls src={audioUrl} className="w-full" />
-              <p className="mt-2 text-xs font-bold text-slate-500">
+              <p className="mt-2 text-xs font-semibold text-white/45">
                 {audioName || 'generated-voice.wav'}
               </p>
             </div>
           )}
-          <div className="mt-4 min-h-[180px] whitespace-pre-wrap rounded-[22px] border border-violet-100 bg-white/80 p-4 text-sm leading-7 text-slate-700">
+          <div className="mt-4 min-h-[180px] whitespace-pre-wrap rounded-lg border border-white/10 bg-black/20 p-4 text-sm leading-7 text-white/70">
             {isGenerating ? 'Creating playable audio...' : result || 'Your generated voice script or radio segment will appear here.'}
           </div>
         </div>
@@ -443,8 +409,8 @@ function ControlGroup({ title, value, children }: { title: string; value: string
     <div className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
       <button type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)} className="flex min-h-[44px] w-full items-center justify-between gap-4 text-left">
         <span>
-          <span className="block text-xs font-black uppercase tracking-[0.16em] text-violet-500">{title}</span>
-          <span className="mt-1 block text-sm font-bold text-slate-700">{value}</span>
+          <span className="block text-xs font-semibold text-violet-300/85">{title}</span>
+          <span className="mt-1 block text-sm font-semibold text-white">{value}</span>
         </span>
         <span aria-hidden="true" className={`grid h-[44px] w-[44px] place-items-center rounded-lg border border-white/10 bg-white/[0.06] text-white transition ${open ? 'rotate-90' : ''}`}>
           <span className="h-2.5 w-2.5 -rotate-45 border-b border-r border-white/55" />
