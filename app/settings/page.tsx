@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { SaviSidebar } from '@/components/SaviSidebar';
+import { SaviAppShell, SaviPageHeader, SaviTopBar } from '@/components/SaviAppShell';
 import { useCommerceAccount } from '@/lib/commerce/useCommerceAccount';
 import { useAuthoritativeCredits } from '@/lib/savi/useAuthoritativeCredits';
 import { LegalLinks } from '@/components/LegalLinks';
@@ -37,13 +37,16 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="savi-app-home min-h-screen bg-black text-white">
-      <SaviSidebar active="Settings" credits={credits} />
-      <section className="savi-content-shell mx-auto max-w-4xl px-5 py-24 lg:py-12">
-        <p className="text-sm font-bold uppercase tracking-[0.24em] text-cyan-200/75">Settings</p>
-        <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">Your SAVI workspace</h1>
-        <div className="mt-7 border border-white/10 bg-white/[0.035] p-5 sm:p-6">
-          <h2 className="text-xl font-bold sm:text-2xl">Account and generation</h2>
+    <SaviAppShell active="Settings" credits={credits} contentClassName="savi-mobile-content-offset">
+      <SaviTopBar title="Settings" />
+      <div className="savi-page-container savi-page-container-narrow">
+        <SaviPageHeader
+          eyebrow="Settings"
+          title="Your SAVI workspace"
+          description="Manage your account, billing access, purchase history, and account preferences."
+        />
+        <div className="savi-panel mt-7 p-5 sm:p-6">
+          <h2 className="savi-section-title sm:text-2xl">Account and generation</h2>
           <div className="mt-5 space-y-4 text-white/65">
             <p>{user ? `Signed in as ${user.email}.` : 'Sign in with Google to connect your SAVI workspace.'}</p>
             <p>Credits are protected, and paid actions confirm their cost before they run. Generated images, videos, audio, and documents stay private and appear in Library.</p>
@@ -54,17 +57,17 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-        <div id="billing" className="mt-6 border border-white/10 bg-white/[0.035] p-5 sm:p-6">
+        <div id="billing" className="savi-panel mt-6 scroll-mt-20 p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-bold uppercase tracking-[0.2em] text-cyan-200/75">Billing</p>
-              <h2 className="mt-3 text-2xl font-black">Current plan</h2>
+              <p className="savi-eyebrow">Billing</p>
+              <h2 className="mt-1 text-2xl font-bold">Current plan</h2>
             </div>
             <button
               type="button"
               onClick={() => user ? void openBillingPortal() : signIn()}
               disabled={Boolean(user && (isLoading || !state?.billingProfile.exists || pendingAction === 'billing-portal'))}
-              className="min-h-[44px] rounded-lg bg-white px-4 py-2 text-sm font-bold text-black disabled:cursor-not-allowed disabled:opacity-40"
+              className="savi-button savi-button-primary"
             >
               {pendingAction === 'billing-portal' ? 'Opening...' : user ? 'Manage billing' : 'Sign in'}
             </button>
@@ -86,16 +89,16 @@ export default function SettingsPage() {
               {currentSubscription?.cancelAtPeriodEnd ? <p className="mt-2 text-sm text-amber-100/75">Cancellation is scheduled for the end of the current billing period.</p> : null}
               {!currentSubscription ? <p className="mt-3 text-sm text-white/55">Explore plans when you are ready to add recurring credits.</p> : null}
               <div className="mt-5 flex flex-wrap items-center gap-4 text-sm">
-                <Link href="/credits" className="inline-flex min-h-[44px] items-center rounded-lg font-bold text-cyan-100 underline decoration-cyan-100/30 underline-offset-4">Credits &amp; Plans</Link>
+                <Link href="/credits" className="savi-button savi-button-ghost px-0 text-violet-200">Credits &amp; Plans</Link>
                 <span className="text-white/35">Purchase history is listed below.</span>
               </div>
             </div>
           ) : null}
           <p className="mt-5 text-sm leading-6 text-white/50">Subscription credits roll over up to the plan cap. Welcome and top-up credits are not clipped or expired.</p>
         </div>
-        <div className="mt-6 border border-white/10 bg-white/[0.035] p-5 sm:p-6">
-          <p className="text-sm font-bold uppercase tracking-[0.2em] text-cyan-200/75">Purchase history</p>
-          <h2 className="mt-3 text-2xl font-black">Recent billing activity</h2>
+        <div className="savi-panel mt-6 p-5 sm:p-6">
+          <p className="savi-eyebrow">Purchase history</p>
+          <h2 className="mt-1 text-2xl font-bold">Recent billing activity</h2>
           {!isLoading && state?.recentPurchases.length ? (
             <div className="mt-5 space-y-3">
               {state.recentPurchases.slice(0, 10).map((purchase, index) => {
@@ -114,21 +117,21 @@ export default function SettingsPage() {
           ) : null}
           {!isLoading && !state?.recentPurchases.length ? <p className="mt-5 text-white/60">No purchases are recorded for this account.</p> : null}
         </div>
-        <div className="mt-6 border border-rose-200/15 bg-rose-200/[0.025] p-5 sm:p-6">
-          <p className="text-sm font-bold uppercase tracking-[0.2em] text-rose-200/75">Account</p>
-          <h2 className="mt-3 text-2xl font-black">Request account deletion</h2>
+        <div className="savi-panel mt-6 border-rose-200/15 p-5 sm:p-6">
+          <p className="savi-eyebrow text-rose-200/80">Account</p>
+          <h2 className="mt-1 text-2xl font-bold">Request account deletion</h2>
           <p className="mt-4 max-w-2xl text-sm leading-6 text-white/60">Submit an authenticated deletion request. The operator will process it under the published account and billing policy; you will be signed out after the request is recorded.</p>
           {deletionState === 'requested' ? <p className="mt-4 text-sm text-emerald-200">Your deletion request was recorded and you have been signed out.</p> : null}
           {deletionError ? <p className="mt-4 text-sm text-rose-200">{deletionError}</p> : null}
           {user && deletionState !== 'requested' ? (
-            <button type="button" onClick={() => void requestAccountDeletion()} disabled={deletionState === 'submitting'} className="mt-5 min-h-[44px] rounded-lg border border-rose-200/30 px-4 py-2 text-sm font-bold text-rose-100 transition hover:border-rose-200/60 disabled:cursor-not-allowed disabled:opacity-50">
+            <button type="button" onClick={() => void requestAccountDeletion()} disabled={deletionState === 'submitting'} className="savi-button savi-button-danger mt-5">
               {deletionState === 'submitting' ? 'Recording request...' : 'Request account deletion'}
             </button>
           ) : null}
         </div>
         <LegalLinks className="mt-12 border-t border-white/10 pt-6" />
-      </section>
-    </main>
+      </div>
+    </SaviAppShell>
   );
 }
 

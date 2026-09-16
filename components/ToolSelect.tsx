@@ -52,17 +52,17 @@ export function ToolSelect<T extends string>({
         onClick={() => setOpen((current) => !current)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-left text-sm font-black text-white shadow-sm backdrop-blur transition hover:border-white/20"
+        className="savi-control flex items-center justify-between gap-3 text-left"
       >
         <span className="min-w-0">
-          <span className="block text-[9px] font-black uppercase tracking-[0.16em] text-violet-500">{label}</span>
+          <span className="block text-xs font-semibold text-violet-300">{label}</span>
           <span className="block truncate leading-4">{currentLabel}</span>
         </span>
         <span aria-hidden="true" className={`h-2.5 w-2.5 rotate-45 border-b border-r border-white/45 transition ${open ? 'rotate-[225deg]' : ''}`} />
       </button>
 
       {open && (
-        <div className="absolute left-0 top-[calc(100%+8px)] z-30 w-full min-w-[150px] overflow-hidden rounded-lg border border-white/10 bg-[#17171c] p-1 shadow-[0_24px_70px_rgba(0,0,0,0.35)] backdrop-blur-xl" role="listbox" aria-label={label}>
+        <div className="savi-elevated absolute left-0 top-[calc(100%+8px)] z-30 w-full min-w-[150px] overflow-hidden p-1" role="listbox" aria-label={label}>
           {options.map((option) => {
             const active = option === value;
             return (
@@ -75,7 +75,7 @@ export function ToolSelect<T extends string>({
                   onChange(option);
                   setOpen(false);
                 }}
-                className={`flex min-h-[44px] w-full items-center justify-between rounded-md px-3 py-2 text-sm font-black transition ${active ? 'bg-white/[0.12] text-white' : 'text-white/65 hover:bg-white/[0.06] hover:text-white'}`}
+                className={`flex min-h-[44px] w-full items-center justify-between rounded-md px-3 py-2 text-sm font-semibold transition ${active ? 'bg-violet-400/[0.12] text-white' : 'text-white/70 hover:bg-white/[0.06] hover:text-white'}`}
               >
                 <span>{`${labels?.[option] ?? option}${suffix}`}</span>
                 {active && <span aria-hidden="true" className="text-white/45">OK</span>}

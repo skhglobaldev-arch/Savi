@@ -123,14 +123,6 @@ const OUTPUT_STORAGE_KEY = 'savi.ask.outputs.v2';
 const MAX_MEMORY_MESSAGES = 50;
 const MAX_CHAT_ATTACHMENTS = 6;
 const MAX_CHAT_ATTACHMENT_SIZE = 25 * 1024 * 1024;
-const WELCOME_HEADLINES = [
-  'What do you want to create?',
-  'What should we build today?',
-  'What idea are we turning into output?',
-  'Ask. Create. Organise.',
-  'What can SAVI help you shape?',
-  'Ready when your idea is.'
-];
 
 const PDF_TOOL_TITLES: Record<string, string> = {
   organize_pdf: 'Organize PDF pages',
@@ -610,18 +602,11 @@ function loadStoredSessions(): ChatSession[] {
 
 function loadInitialChatState() {
   const sessions = loadStoredSessions();
-  if (sessions.length) {
-    const activeId = typeof window === 'undefined' ? '' : window.localStorage.getItem(ACTIVE_CHAT_KEY);
-    const activeSession = sessions.find((session) => session.id === activeId) ?? sessions[0];
-    return {
-      sessions,
-      activeChatId: activeSession.id,
-      messages: activeSession.messages.slice(-MAX_MEMORY_MESSAGES)
-    };
-  }
-
+  // A bare Ask SAVI workspace is always a new, ephemeral chat. Stored chats
+  // are restored for the sidebar, then opened only through an explicit route
+  // or the existing chat-open event.
   return {
-    sessions: [],
+    sessions,
     activeChatId: '',
     messages: []
   };
@@ -925,7 +910,6 @@ export function AskSaviChat({
   const [showQuickMenu, setShowQuickMenu] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [uploadError, setUploadError] = useState('');
-  const [welcomeHeadline, setWelcomeHeadline] = useState(WELCOME_HEADLINES[0]);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const actionAttachmentStoreRef = useRef<Record<string, ChatAttachment[]>>({});
@@ -940,6 +924,9 @@ export function AskSaviChat({
   const handledInitialMessageKey = useRef(0);
   const handledNewChatKey = useRef(0);
   const handledRouteChat = useRef(false);
+  const submitInFlightRef = useRef(false);
+
+  const isFreshWorkspace = !activeChatId && messages.length === 0;
 
   const visibleMessages = useMemo(() => {
     if (messages.length) return messages;
@@ -973,10 +960,6 @@ export function AskSaviChat({
     if (!activeSession) return;
     setMessages(activeSession.messages.slice(-MAX_MEMORY_MESSAGES));
   }, [activeChatId]);
-
-  useEffect(() => {
-    setWelcomeHeadline(WELCOME_HEADLINES[Math.floor(Math.random() * WELCOME_HEADLINES.length)]);
-  }, []);
 
   useEffect(() => {
     if (!chatHydrated || typeof window === 'undefined') return;
@@ -1115,10 +1098,15 @@ export function AskSaviChat({
   function createNewChat() {
     setActiveChatId('');
     setMessages([]);
+    setInput('');
     setDraftTemplate(undefined);
     setToolDraft(undefined);
-    setAttachments([]);
+    setAttachments((current) => {
+      current.forEach((attachment) => revokeOwnedObjectUrl(attachment.previewUrl));
+      return [];
+    });
     setUploadError('');
+    setShowQuickMenu(false);
     actionAttachmentStoreRef.current = {};
     pendingUploadActionRef.current = null;
     recentAttachmentsRef.current = { image: [], pdf: [], video: [], audio: [], file: [] };
@@ -1130,9 +1118,13 @@ export function AskSaviChat({
     if (!session) return;
     setActiveChatId(session.id);
     setMessages(session.messages.slice(-MAX_MEMORY_MESSAGES));
+    setInput('');
     setDraftTemplate(undefined);
     setToolDraft(undefined);
-    setAttachments([]);
+    setAttachments((current) => {
+      current.forEach((attachment) => revokeOwnedObjectUrl(attachment.previewUrl));
+      return [];
+    });
     setUploadError('');
     actionAttachmentStoreRef.current = {};
     pendingUploadActionRef.current = null;
@@ -1301,7 +1293,10 @@ export function AskSaviChat({
 
   async function submitText(rawMessage: string, submittedAttachments: ChatAttachment[] = []) {
     const clean = rawMessage.trim();
-    if ((!clean && !submittedAttachments.length) || runningActionId) return;
+    if ((!clean && !submittedAttachments.length) || runningActionId || submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
+
+    try {
 
     const userMessage: ChatMessage = {
       id: makeId(),
@@ -1527,6 +1522,9 @@ export function AskSaviChat({
     }
 
     addPendingAction(action);
+    } finally {
+      submitInFlightRef.current = false;
+    }
   }
 
   function addAssistantMessage(content: string, quickReplies?: string[]) {
@@ -2179,10 +2177,10 @@ export function AskSaviChat({
 
   return (
     <section className="relative min-h-[calc(100vh-64px)] overflow-hidden bg-transparent lg:min-h-screen">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/36 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-violet-500/[0.055] to-transparent" />
 
       <div ref={scrollerRef} className="h-[calc(100vh-64px)] overflow-y-auto px-3 pb-40 pt-14 md:px-8 lg:h-screen lg:pb-44 lg:pt-16">
-        <div className="mx-auto flex min-h-full max-w-6xl flex-col justify-center gap-8">
+        <div className={`mx-auto flex min-h-full max-w-6xl flex-col gap-8 ${isFreshWorkspace ? 'justify-center' : 'justify-end py-8'}`}>
           {visibleMessages.map((message) => {
             const isWelcome = message.id === 'welcome';
             const isUser = message.role === 'user';
@@ -2203,7 +2201,11 @@ export function AskSaviChat({
                   }
                 >
                   {isWelcome ? (
-                    <h1 dir={direction} className="text-2xl font-light tracking-tight text-white/88 md:text-4xl">{welcomeHeadline}</h1>
+                    <div className="mx-auto max-w-3xl">
+                      <p className="savi-eyebrow">SAVI workspace</p>
+                      <h1 dir={direction} className="mt-3 text-4xl font-semibold leading-[1.08] text-white md:text-6xl">Ask. Create. Organise.</h1>
+                      <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-white/58">Bring an idea, a question, or a file. SAVI helps shape the next useful output.</p>
+                    </div>
                   ) : (
                     <div dir={direction} className="whitespace-pre-wrap text-[15px] leading-8 md:text-[16px]">{message.content}</div>
                   )}
@@ -2218,21 +2220,20 @@ export function AskSaviChat({
 
                   {isWelcome && (
                     <>
-                      <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-white/48">
-                        Smart Assistant for Valuable Ideas
-                      </p>
-                      <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-white/38">
-                        One workspace for conversation, images, video, voice, files, and the work you create along the way.
-                      </p>
-                      <div className="mx-auto mt-5 flex max-w-2xl flex-wrap justify-center gap-2">
-                        {(['All Tools', 'Images', 'Video', 'Voice', 'Files', 'All Media'] as SidebarMode[]).map((mode) => (
+                      <div className="mx-auto mt-7 flex max-w-2xl flex-wrap justify-center gap-2">
+                        {([
+                          { label: 'Create an image', mode: 'Images' },
+                          { label: 'Make a video', mode: 'Video' },
+                          { label: 'Work with a PDF', mode: 'Files' },
+                          { label: 'Generate voice', mode: 'Voice' }
+                        ] as Array<{ label: string; mode: SidebarMode }>).map((item) => (
                           <button
-                            key={mode}
+                            key={item.mode}
                             type="button"
-                            onClick={() => onOpenTool(mode)}
-                            className="min-h-[44px] rounded-lg border border-white/10 bg-white/[0.055] px-3 py-1.5 text-[11px] font-semibold text-white/55 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+                            onClick={() => onOpenTool(item.mode)}
+                            className="savi-chip min-h-[40px] px-3 text-sm transition hover:border-violet-300/35 hover:bg-violet-500/[0.1] hover:text-violet-100"
                           >
-                            {mode === 'All Media' ? 'Library' : mode}
+                            {item.label}
                           </button>
                         ))}
                       </div>
@@ -2306,7 +2307,7 @@ export function AskSaviChat({
       </div>
 
       <div className="absolute inset-x-0 bottom-0 z-20 px-3 pb-4 md:px-6 md:pb-6">
-        <div className="mx-auto max-w-4xl">
+        <div className={`mx-auto ${isFreshWorkspace ? 'max-w-3xl' : 'max-w-4xl'}`}>
           {draftTemplate && (
             <div className="mb-2 inline-flex rounded-full border border-violet-300/20 bg-violet-500/16 px-3 py-1.5 text-[11px] font-semibold text-violet-100">
               Template ready: {draftTemplate.title}
@@ -2344,7 +2345,7 @@ export function AskSaviChat({
             </div>
           ) : null}
           {uploadError && <div className="mb-2"><ToolStatus kind="error">{uploadError}</ToolStatus></div>}
-          <div className="savi-home-input px-4 py-3">
+          <div className="savi-elevated border-white/12 bg-[rgba(16,18,24,0.97)] px-4 py-3 shadow-[0_18px_52px_rgba(0,0,0,0.34)] transition focus-within:border-violet-300/40 focus-within:shadow-[0_0_0_3px_rgba(139,92,246,0.13),0_18px_52px_rgba(0,0,0,0.34)]">
             <div className="flex items-end gap-3">
               <input
                 ref={fileInputRef}
@@ -2361,7 +2362,7 @@ export function AskSaviChat({
               <button type="button" onClick={() => fileInputRef.current?.click()} onContextMenu={(event) => {
                 event.preventDefault();
                 setShowQuickMenu((current) => !current);
-              }} className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg text-3xl font-light text-white/72 hover:bg-white/8" aria-label="Upload files">
+              }} className="savi-icon-button border border-white/10 bg-white/[0.045] text-3xl font-light text-white/72" aria-label="Upload files">
                 <span aria-hidden="true" className="relative block h-4 w-4 before:absolute before:left-1/2 before:top-0 before:h-4 before:w-px before:-translate-x-1/2 before:bg-current after:absolute after:left-0 after:top-1/2 after:h-px after:w-4 after:-translate-y-1/2 after:bg-current" />
               </button>
               <textarea
@@ -2378,7 +2379,7 @@ export function AskSaviChat({
                 aria-label="Ask SAVI"
                 className="max-h-32 min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[16px] leading-6 text-white outline-none placeholder:text-white/42"
               />
-              <button type="button" onClick={submit} className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg bg-white text-lg font-black text-black hover:bg-white/85" aria-label="Send">
+              <button type="button" onClick={submit} className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg border border-violet-300/25 bg-violet-600 text-lg font-black text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50" disabled={Boolean(runningActionId)} aria-label="Send">
                 <span aria-hidden="true" className="block h-3 w-3 rotate-45 border-r-2 border-t-2 border-current" />
               </button>
             </div>

@@ -113,7 +113,7 @@ export function AllMediaLibrary() {
             ))}
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-white/12 bg-black/18 px-4 py-14 text-center text-sm font-medium text-white/36">
+          <div className="savi-empty-state py-14">
             {activeSection.empty}
           </div>
         )}

@@ -242,12 +242,16 @@ export function VideoToolsStudio({
   credits,
   onCreditsChange,
   template,
-  templateLaunchKey = 0
+  templateLaunchKey = 0,
+  launchToolId,
+  launchKey = 0
 }: {
   credits: number | null;
   onCreditsChange: (credits: number) => void;
   template?: TemplateItem;
   templateLaunchKey?: number;
+  launchToolId?: string;
+  launchKey?: number;
 }) {
   const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
   const [toolId, setToolId] = useState<VideoToolId>('text_video');
@@ -324,6 +328,12 @@ export function VideoToolsStudio({
     setDuration('6');
     setModel('omni');
   }, [template, templateLaunchKey]);
+
+  useEffect(() => {
+    if (!launchToolId || launchKey === 0) return;
+    const nextTool = videoTools.find((tool) => tool.id === launchToolId);
+    if (nextTool) selectVideoTool(nextTool.id);
+  }, [launchKey, launchToolId]);
 
   function clearGeneratedVideo() {
     revokeOwnedObjectUrl(videoUrl);

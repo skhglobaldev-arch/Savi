@@ -27,8 +27,8 @@ export function ToolHeader({
         </span>
         <div className="min-w-0">
           <p className="savi-tool-eyebrow">{eyebrow}</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-[-0.01em] text-white md:text-2xl">{title}</h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-white/55">{description}</p>
+          <h2 className="mt-1 text-xl font-semibold text-white md:text-2xl">{title}</h2>
+          <p className="mt-2 max-w-2xl text-[15px] leading-6 text-white/62">{description}</p>
         </div>
       </div>
       {children ? <div className="mt-5">{children}</div> : null}
@@ -125,15 +125,15 @@ export function ToolFieldLabel({
     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
       <div className="min-w-0">
         <p className="text-sm font-semibold text-white">{label}</p>
-        {hint ? <p className="mt-1 text-xs leading-5 text-white/45">{hint}</p> : null}
+        {hint ? <p className="mt-1 text-[13px] leading-5 text-white/50">{hint}</p> : null}
       </div>
-      {badge ? <span className="shrink-0 rounded-md border border-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/42">{badge}</span> : null}
+      {badge ? <span className="savi-badge shrink-0">{badge}</span> : null}
     </div>
   );
 }
 
 export function ToolResultEmpty({ children = 'Your result will appear here.' }: { children?: ReactNode }) {
-  return <div className="savi-tool-result-empty" aria-live="polite">{children}</div>;
+  return <div className="savi-empty-state" aria-live="polite">{children}</div>;
 }
 
 export function ToolStatus({
@@ -145,7 +145,7 @@ export function ToolStatus({
 }) {
   return (
     <div
-      className={`savi-tool-status savi-tool-status-${kind}`}
+      className={`savi-alert ${kind === 'error' ? 'savi-alert-error' : kind === 'loading' ? 'savi-alert-info' : ''}`}
       role={kind === 'error' ? 'alert' : 'status'}
       aria-live={kind === 'error' ? 'assertive' : 'polite'}
     >

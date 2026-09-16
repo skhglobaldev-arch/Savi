@@ -1,6 +1,6 @@
 'use client';
 
-import { SaviSidebar } from '@/components/SaviSidebar';
+import { SaviAppShell, SaviPageHeader, SaviTopBar } from '@/components/SaviAppShell';
 import { useCommerceAccount, type CommerceCatalogState } from '@/lib/commerce/useCommerceAccount';
 import { useAuthoritativeCredits } from '@/lib/savi/useAuthoritativeCredits';
 import { LegalLinks } from '@/components/LegalLinks';
@@ -39,31 +39,25 @@ export default function CreditsPage() {
     : 0;
 
   return (
-    <main className="savi-app-home min-h-screen bg-black text-white">
-      <SaviSidebar active="Credits" credits={credits} />
-      <section className="savi-content-shell savi-mobile-content-offset w-full max-w-6xl px-5 pb-16 lg:py-12">
-        <header className="border-b border-white/10 pb-7">
-          <p className="text-xs font-bold uppercase tracking-[0.22em] text-violet-300/80">Credits &amp; Plans</p>
-          <div className="mt-3 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h1 className="text-3xl font-black tracking-tight sm:text-4xl">Keep your creative flow moving.</h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-white/58">
-                See what is available now, what belongs to your plan, and when your next plan cycle begins.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 text-sm">
-              <span className="border border-white/10 px-3 py-2 text-white/62">
+    <SaviAppShell active="Credits" credits={credits} contentClassName="savi-mobile-content-offset">
+      <SaviTopBar title="Credits & Plans" />
+      <div className="savi-page-container">
+        <SaviPageHeader
+          eyebrow="Credits & Plans"
+          title="Keep your creative flow moving."
+          description="See what is available now, what belongs to your plan, and when your next plan cycle begins."
+          actions={(
+            <>
+              <span className="savi-badge">
                 {currentPlan ? currentPlan.displayName : user ? 'Plan unavailable' : 'Free plan'}
               </span>
-              {currentSubscription ? (
-                <span className="border border-emerald-300/25 px-3 py-2 text-emerald-100">{getSubscriptionStatus(currentSubscription.status)}</span>
-              ) : null}
-            </div>
-          </div>
-        </header>
+              {currentSubscription ? <span className="savi-badge border-emerald-300/25 text-emerald-100">{getSubscriptionStatus(currentSubscription.status)}</span> : null}
+            </>
+          )}
+        />
 
         {isLowCredits ? (
-          <aside className="mt-6 flex flex-col gap-4 border border-amber-200/25 bg-amber-200/[0.06] px-4 py-4 sm:flex-row sm:items-center sm:justify-between" role="status">
+          <aside className="savi-alert savi-alert-warning mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between" role="status">
             <div>
               <p className="text-sm font-bold text-amber-50">You are running low on credits.</p>
               <p className="mt-1 text-sm text-amber-50/65">Add a one-time pack or review plans before your next generation.</p>
@@ -75,13 +69,13 @@ export default function CreditsPage() {
           </aside>
         ) : null}
 
-        {error ? <p className="mt-5 border border-rose-200/20 bg-rose-200/[0.06] px-4 py-3 text-sm text-rose-100" role="alert">{error}</p> : null}
+        {error ? <p className="savi-alert savi-alert-error mt-5" role="alert">{error}</p> : null}
 
-        <section className="mt-8 border border-white/10 bg-white/[0.035] p-5 sm:p-6" aria-labelledby="credit-overview-title">
+        <section className="savi-panel mt-8 p-5 sm:p-6" aria-labelledby="credit-overview-title">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-white/42">Balance</p>
-              <h2 id="credit-overview-title" className="mt-2 text-xl font-bold">Credit overview</h2>
+              <p className="savi-eyebrow text-white/50">Balance</p>
+              <h2 id="credit-overview-title" className="savi-section-title mt-1">Credit overview</h2>
             </div>
             <p className="text-sm text-white/48">{isCreditsLoading || isCommerceLoading ? 'Refreshing account...' : 'Available to use now'}</p>
           </div>
@@ -115,11 +109,11 @@ export default function CreditsPage() {
           )}
         </section>
 
-        <section className="mt-10 border border-violet-200/20 bg-violet-200/[0.045] p-5 sm:p-6" aria-labelledby="current-plan-title">
+        <section className="savi-panel mt-10 border-violet-200/20 p-5 shadow-[var(--savi-glow-accent)] sm:p-6" aria-labelledby="current-plan-title">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-violet-200/70">Your plan</p>
-              <h2 id="current-plan-title" className="mt-2 text-2xl font-black">{currentPlan?.displayName ?? 'Current plan unavailable'}</h2>
+              <p className="savi-eyebrow">Your plan</p>
+              <h2 id="current-plan-title" className="mt-1 text-2xl font-bold">{currentPlan?.displayName ?? 'Current plan unavailable'}</h2>
               <p className="mt-2 max-w-xl text-sm leading-6 text-white/58">{getPlanSummary(currentPlan, isPaidPlan)}</p>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -128,12 +122,12 @@ export default function CreditsPage() {
                   type="button"
                   onClick={() => void openBillingPortal()}
                   disabled={pendingAction === 'billing-portal'}
-                  className="min-h-[44px] rounded-lg border border-white/20 bg-white/[0.08] px-4 py-2 text-sm font-bold text-white transition hover:bg-white/[0.14] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="savi-button savi-button-secondary"
                 >
                   {pendingAction === 'billing-portal' ? 'Opening...' : 'Manage billing'}
                 </button>
               ) : null}
-              {!isPaidPlan ? <a href="#plans" className="inline-flex min-h-[44px] items-center rounded-lg border border-violet-200/35 px-4 py-2 text-sm font-bold text-violet-100 transition hover:bg-violet-200/[0.08]">Explore plans</a> : null}
+              {!isPaidPlan ? <a href="#plans" className="savi-button savi-button-primary">Explore plans</a> : null}
             </div>
           </div>
           <div className="mt-6 grid gap-x-8 gap-y-5 border-t border-white/10 pt-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -155,8 +149,8 @@ export default function CreditsPage() {
         <section id="plans" className="mt-10 scroll-mt-8" aria-labelledby="plans-title">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-white/42">Compare</p>
-              <h2 id="plans-title" className="mt-2 text-xl font-bold">Plans that fit the way you create</h2>
+              <p className="savi-eyebrow text-white/50">Compare</p>
+              <h2 id="plans-title" className="savi-section-title mt-1">Plans that fit the way you create</h2>
             </div>
             <p className="text-sm text-white/48">Creator is recommended for regular creative work.</p>
           </div>
@@ -170,8 +164,8 @@ export default function CreditsPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="font-bold text-white">{plan.displayName}</h3>
-                      {isCurrent ? <span className="border border-violet-200/30 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-violet-100">Current plan</span> : null}
-                      {plan.recommended ? <span className="border border-cyan-200/25 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-100">Recommended</span> : null}
+                      {isCurrent ? <span className="savi-badge savi-badge-accent">Current plan</span> : null}
+                      {plan.recommended ? <span className="savi-badge border-sky-200/25 text-sky-100">Recommended</span> : null}
                     </div>
                     <p className="mt-2 text-sm text-white/55">
                       {plan.priceDisplay}{plan.id === 'free' ? '' : ` / ${plan.billingInterval}`} · {plan.includedRecurringCredits > 0 ? `${plan.includedRecurringCredits.toLocaleString()} monthly credits` : `${plan.oneTimeWelcomeCredits.toLocaleString()} welcome credits`}
@@ -184,7 +178,7 @@ export default function CreditsPage() {
                         type="button"
                         disabled={plan.id === 'free' || Boolean(user && (!plan.checkoutAvailable || pendingAction === `plan:${plan.id}`))}
                         onClick={() => { if (plan.id !== 'free') { if (user) void startSubscriptionCheckout(plan.id); else signIn(); } }}
-                        className="min-h-[44px] rounded-lg border border-white/20 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-40"
+                        className="savi-button savi-button-secondary"
                       >
                         {pendingAction === `plan:${plan.id}` ? 'Opening...' : plan.id === 'free' ? 'Included' : !user ? 'Sign in to choose' : plan.checkoutAvailable ? 'Choose plan' : 'Unavailable'}
                       </button>
@@ -200,15 +194,15 @@ export default function CreditsPage() {
         <section id="top-ups" className="mt-10 scroll-mt-8" aria-labelledby="top-ups-title">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-white/42">One-time credits</p>
-              <h2 id="top-ups-title" className="mt-2 text-xl font-bold">Add a little more room</h2>
+              <p className="savi-eyebrow text-white/50">One-time credits</p>
+              <h2 id="top-ups-title" className="savi-section-title mt-1">Add a little more room</h2>
             </div>
             <p className="text-sm text-white/48">Top-ups are added to your balance and do not expire.</p>
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {isCommerceLoading && !catalog ? <p className="text-sm text-white/55">Loading top-ups...</p> : null}
             {catalog?.topUpPacks.map((pack) => (
-              <div key={pack.id} className="flex min-h-40 flex-col justify-between border border-white/10 bg-white/[0.035] p-4">
+              <div key={pack.id} className="savi-card savi-card-interactive flex min-h-40 flex-col justify-between p-4">
                 <div>
                   <h3 className="font-bold text-white">{pack.displayName}</h3>
                   <p className="mt-2 text-2xl font-black text-white">{pack.priceDisplay}</p>
@@ -218,7 +212,7 @@ export default function CreditsPage() {
                   type="button"
                   disabled={Boolean(user && (!pack.checkoutAvailable || pendingAction === `pack:${pack.id}`))}
                   onClick={() => user ? void startTopUpCheckout(pack.id) : signIn()}
-                  className="mt-5 min-h-[44px] w-full rounded-lg border border-white/20 px-3 py-2 text-sm font-bold text-white transition hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="savi-button savi-button-secondary mt-5 w-full"
                 >
                   {pendingAction === `pack:${pack.id}` ? 'Opening...' : !user ? 'Sign in to add' : pack.checkoutAvailable ? 'Add credits' : 'Unavailable'}
                 </button>
@@ -229,8 +223,8 @@ export default function CreditsPage() {
         </section>
 
         <LegalLinks className="mt-12 border-t border-white/10 pt-6" />
-      </section>
-    </main>
+      </div>
+    </SaviAppShell>
   );
 }
 

@@ -498,12 +498,16 @@ export function ImageToolsStudio({
   credits,
   onCreditsChange,
   template,
-  templateLaunchKey = 0
+  templateLaunchKey = 0,
+  launchToolId,
+  launchKey = 0
 }: {
   credits: number | null;
   onCreditsChange: (credits: number) => void;
   template?: TemplateItem;
   templateLaunchKey?: number;
+  launchToolId?: string;
+  launchKey?: number;
 }) {
   const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
   const [toolId, setToolId] = useState<ImageToolId>('text_to_image');
@@ -706,6 +710,12 @@ export function ImageToolsStudio({
 
     selectTool(nextTool, template.prompt);
   }, [template, templateLaunchKey]);
+
+  useEffect(() => {
+    if (!launchToolId || launchKey === 0) return;
+    const nextTool = imageTools.find((tool) => tool.id === launchToolId);
+    if (nextTool) selectTool(nextTool.id);
+  }, [launchKey, launchToolId]);
 
   function loadImage(file: File | undefined) {
     if (!file) return;

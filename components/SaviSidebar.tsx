@@ -7,7 +7,7 @@ import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 import { LegalConsentNotice } from './LegalLinks';
 
 export type SidebarMode = ToolMode | 'All Media' | 'All Tools';
-type SidebarActive = SidebarMode | 'Credits' | 'Settings' | 'Activity';
+export type SidebarActive = SidebarMode | 'Credits' | 'Settings' | 'Activity';
 
 type SidebarItem = {
   label: string;
@@ -289,13 +289,13 @@ export function SaviSidebar({
     if (!user) {
       return (
         <div className="p-1">
-          <p className="px-2 pt-1 text-[13px] font-semibold text-white">Save your SAVI workspace</p>
-          <p className="px-2 pt-1 text-[11px] leading-4 text-white/42">Sign in to keep your profile and credits connected.</p>
+          <p className="px-2 pt-1 text-sm font-semibold text-white">Save your SAVI workspace</p>
+          <p className="px-2 pt-1 text-xs leading-5 text-white/50">Sign in to keep your profile and credits connected.</p>
           <button
             type="button"
             disabled={isAuthLoading}
             onClick={() => signIn()}
-            className="mt-3 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-white/14 bg-white/10 px-3 py-2.5 text-[13px] font-semibold text-white transition hover:bg-white/16 disabled:opacity-50"
+            className="savi-button savi-button-secondary mt-3 w-full"
           >
             <GoogleIcon />
             Continue with Google
@@ -308,9 +308,9 @@ export function SaviSidebar({
     return (
       <>
         <div className="mb-2 border-b border-white/10 px-3 pb-3">
-          <p className="truncate text-[13px] font-semibold text-white">{user.name}</p>
-          <p className="mt-0.5 truncate text-[11px] text-white/42">{user.email}</p>
-          <p className="mt-2 text-[11px] font-semibold text-violet-200">
+          <p className="truncate text-sm font-semibold text-white">{user.name}</p>
+          <p className="mt-0.5 truncate text-xs text-white/50">{user.email}</p>
+          <p className="mt-2 text-xs font-semibold text-violet-200">
             {isPlanLoading ? 'Loading plan...' : `${currentPlanLabel || 'Plan details'} · ${formatCredits(credits)}`}
           </p>
         </div>
@@ -324,9 +324,9 @@ export function SaviSidebar({
             void signOut();
             closeMobileMenu();
           }}
-          className="flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-white/62 transition hover:bg-white/[0.06] hover:text-white"
+          className="savi-button savi-button-ghost w-full justify-start px-3"
         >
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.035]"><SignOutIcon /></span>
+          <span className="grid h-8 w-8 shrink-0 place-items-center"><SignOutIcon /></span>
           <span>Sign out</span>
         </button>
       </>
@@ -335,19 +335,19 @@ export function SaviSidebar({
 
   return (
     <>
-      <aside className={`savi-global-sidebar fixed inset-y-0 left-0 z-40 hidden flex-col overflow-visible border-r border-white/[0.08] bg-[#111318]/96 px-2.5 py-3 text-white shadow-[12px_0_34px_rgba(0,0,0,0.16)] backdrop-blur-2xl lg:flex ${collapsed ? 'items-center' : ''}`}>
+      <aside className={`savi-global-sidebar fixed inset-y-0 left-0 z-40 hidden flex-col overflow-visible border-r border-[var(--savi-border-subtle)] bg-[var(--savi-bg-subtle)] px-3 py-3 text-white lg:flex ${collapsed ? 'items-center' : ''}`}>
         <div className={`flex w-full items-center gap-3 ${collapsed ? 'justify-center' : 'justify-between'}`}>
-          <Link href="/" className={`flex min-h-[44px] min-w-0 items-center gap-3 rounded-xl px-1.5 py-1.5 transition hover:bg-white/[0.06] ${collapsed ? 'justify-center' : ''}`} aria-label="SAVI home">
-            <img src="/brand/savi-logo.png" alt="SAVI" className="h-9 w-9 rounded-xl object-cover shadow-[0_0_24px_rgba(124,58,237,0.32)]" />
+          <Link href="/" className={`flex min-h-[44px] min-w-0 items-center gap-3 rounded-lg px-1.5 py-1.5 transition hover:bg-white/[0.045] ${collapsed ? 'justify-center' : ''}`} aria-label="SAVI home">
+            <img src="/brand/savi-logo.png" alt="SAVI" className="h-9 w-9 rounded-lg object-cover shadow-[0_0_18px_rgba(124,58,237,0.22)]" />
             <span className={`min-w-0 transition ${collapsed ? 'hidden' : 'block'}`}>
               <span className="block truncate text-[16px] font-semibold leading-5 text-white">SAVI</span>
-              <span className="block truncate text-[11px] font-medium text-white/42">by SKH.GLOBAL</span>
+              <span className="block truncate text-xs font-medium text-white/45">by SKH.GLOBAL</span>
             </span>
           </Link>
           <button
             type="button"
             onClick={() => setCollapsed((current) => !current)}
-            className="grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg border border-white/14 text-white/72 transition hover:bg-white/10 hover:text-white"
+            className="savi-icon-button"
             aria-label={collapsed ? 'Open sidebar' : 'Collapse sidebar'}
           >
             {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
@@ -355,14 +355,14 @@ export function SaviSidebar({
         </div>
 
         <div className="mt-4 w-full flex-1 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.22)_transparent]">
-        <nav className="space-y-1.5">
+        <nav className="space-y-1">
           {toolItems.map((item) => (
             <SidebarLink key={item.label} item={item} active={active === item.active} collapsed={collapsed} onClick={(event) => handleModeClick(event, item.mode)} />
           ))}
         </nav>
 
         <div className="mt-5">
-          {!collapsed && <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/32">Create</p>}
+          {!collapsed && <p className="px-3 pb-2 text-xs font-medium text-white/40">Create</p>}
           <nav className="space-y-1">
             {createItems.map((item) => (
               <SidebarLink key={item.label} item={item} active={active === item.active} collapsed={collapsed} onClick={(event) => handleModeClick(event, item.mode)} />
@@ -379,16 +379,16 @@ export function SaviSidebar({
             <button
               type="button"
               onClick={() => setChatsOpen((current) => !current)}
-              className="flex min-h-[44px] w-full items-center justify-between rounded-xl px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/34 transition hover:bg-white/[0.05] hover:text-white/62"
+              className="flex min-h-[44px] w-full items-center justify-between rounded-lg px-3 py-1.5 text-xs font-medium text-white/45 transition hover:bg-white/[0.045] hover:text-white/70"
               aria-expanded={chatsOpen}
             >
               <span>Chats</span>
               <span className="text-white/45">{chatsOpen ? <ChevronDownIcon /> : <ChevronRightIcon />}</span>
             </button>
             {chatsOpen && (
-              <div className="mt-2 space-y-1.5">
+              <div className="mt-1 space-y-1">
                 {chatSessions.length ? chatSessions.map((chat) => (
-                  <div key={chat.id} className="group flex items-center gap-1 rounded-xl text-white/62 transition hover:bg-white/[0.06]">
+                  <div key={chat.id} className="group flex items-center gap-1 rounded-lg text-white/65 transition hover:bg-white/[0.045]">
                     <Link
                       href={`/workspace?chat=${encodeURIComponent(chat.id)}`}
                       onClick={(event) => {
@@ -400,8 +400,8 @@ export function SaviSidebar({
                       }}
                       className="min-h-[44px] min-w-0 flex-1 px-3 py-2.5"
                     >
-                      <span className="block truncate text-[13px] font-medium">{chat.title || 'Conversation'}</span>
-                      <span className="block truncate text-[11px] text-white/34">{new Date(chat.updatedAt).toLocaleDateString()}</span>
+                      <span className="block truncate text-sm font-medium">{chat.title || 'Conversation'}</span>
+                      <span className="block truncate text-xs text-white/40">{new Date(chat.updatedAt).toLocaleDateString()}</span>
                     </Link>
                     <button
                       type="button"
@@ -416,14 +416,14 @@ export function SaviSidebar({
                           // Ignore local sidebar cleanup errors.
                         }
                       }}
-                      className="mr-1 grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg text-white/34 opacity-0 transition hover:bg-white/10 hover:text-white group-hover:opacity-100"
+                      className="savi-icon-button mr-1 text-white/40 opacity-0 group-hover:opacity-100 focus:opacity-100"
                       aria-label={`Close ${chat.title || 'chat'}`}
                     >
                       <CloseIcon />
                     </button>
                   </div>
                 )) : (
-                  <p className="px-3 py-2 text-[12px] text-white/30">No chats yet</p>
+                  <p className="px-3 py-2 text-xs text-white/40">No chats yet</p>
                 )}
               </div>
             )}
@@ -434,19 +434,19 @@ export function SaviSidebar({
         <div className="mt-3 w-full shrink-0">
           <Link
             href="/credits"
-            className={`flex min-h-[44px] items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-white/[0.06] ${active === 'Credits' ? 'bg-white/[0.08] text-white' : 'text-white/68'} ${collapsed ? 'justify-center px-0' : ''}`}
+            className={`flex min-h-[44px] items-center gap-3 rounded-lg border px-3 py-2 text-left transition ${active === 'Credits' ? 'border-violet-300/25 bg-violet-400/[0.1] text-white' : 'border-transparent text-white/70 hover:bg-white/[0.045] hover:text-white'} ${collapsed ? 'justify-center px-0' : ''}`}
           >
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.035] text-violet-100"><CreditIcon /></span>
+            <span className="grid h-8 w-8 shrink-0 place-items-center text-violet-200"><CreditIcon /></span>
             <span className={collapsed ? 'hidden' : 'min-w-0'}>
-              <span className="block text-[13px] font-semibold">Credits</span>
-              <span className="block truncate text-[11px] text-white/38">{formatCredits(credits)}</span>
+              <span className="block text-sm font-semibold">Credits</span>
+              <span className="block truncate text-xs text-white/45">{formatCredits(credits)}</span>
             </span>
           </Link>
         </div>
 
         <div className="relative mt-2 w-full shrink-0">
           {profileOpen && (
-            <div className={`absolute bottom-[calc(100%+8px)] z-50 w-64 rounded-2xl border border-white/[0.16] bg-[#0d1016]/[0.99] p-2 shadow-[0_22px_64px_rgba(0,0,0,0.5)] backdrop-blur-xl ${collapsed ? 'left-full ml-3' : 'left-0 right-0'}`}>
+            <div className={`savi-elevated absolute bottom-[calc(100%+8px)] z-50 w-64 p-2 ${collapsed ? 'left-full ml-3' : 'left-0 right-0'}`}>
               {renderAccountMenu()}
             </div>
           )}
@@ -454,32 +454,32 @@ export function SaviSidebar({
           <button
             type="button"
             onClick={() => setProfileOpen((current) => !current)}
-            className={`flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-white/[0.06] ${collapsed ? 'justify-center px-0' : ''}`}
+            className={`flex min-h-[44px] w-full items-center gap-3 rounded-lg border border-transparent px-3 py-2 text-left transition hover:bg-white/[0.045] ${collapsed ? 'justify-center px-0' : ''}`}
             aria-label={profileOpen ? 'Close account menu' : user ? 'Open account menu' : 'Sign in to SAVI'}
             aria-expanded={profileOpen}
           >
-            <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-violet-500 to-sky-400 text-[12px] font-bold text-white">
+            <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-full bg-violet-600 text-xs font-bold text-white">
               {user?.picture ? <img src={user.picture} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : user?.name?.charAt(0).toUpperCase() || 'S'}
             </span>
             <span className={`min-w-0 ${collapsed ? 'hidden' : 'block'}`}>
-              <span className="block truncate text-[14px] font-semibold text-white/86">{user?.name || 'Sign in to SAVI'}</span>
-              <span className="block truncate text-[12px] text-white/38">{user ? formatCredits(credits) : 'Save your workspace'}</span>
+              <span className="block truncate text-sm font-semibold text-white/90">{user?.name || 'Sign in to SAVI'}</span>
+              <span className="block truncate text-xs text-white/45">{user ? formatCredits(credits) : 'Save your workspace'}</span>
             </span>
           </button>
         </div>
 
       </aside>
 
-      <header className="savi-mobile-bar fixed left-0 top-0 z-40 flex w-full items-center gap-2 border-b border-white/[0.08] bg-[#111318]/98 px-3 text-white backdrop-blur-2xl lg:hidden">
-        <Link href="/" className="flex min-h-[44px] items-center gap-2 rounded-2xl px-1 py-1" aria-label="SAVI home">
-          <img src="/brand/savi-logo.png" alt="SAVI" className="h-8 w-8 rounded-xl object-cover" />
+      <header className="savi-mobile-bar fixed left-0 top-0 z-40 flex w-full items-center gap-2 border-b border-[var(--savi-border-subtle)] bg-[var(--savi-bg-subtle)]/95 px-3 text-white backdrop-blur-xl lg:hidden">
+        <Link href="/" className="flex min-h-[44px] items-center gap-2 rounded-lg px-1 py-1" aria-label="SAVI home">
+          <img src="/brand/savi-logo.png" alt="SAVI" className="h-8 w-8 rounded-lg object-cover" />
           <span className="text-[15px] font-semibold">SAVI</span>
         </Link>
         <button
           ref={mobileMenuButtonRef}
           type="button"
           onClick={() => setMobileMenuOpen(true)}
-          className="ml-auto grid h-[44px] w-[44px] place-items-center rounded-xl border border-white/12 text-white/78 transition hover:bg-white/10 hover:text-white"
+          className="savi-icon-button ml-auto border border-white/10"
           aria-label="Open navigation menu"
           aria-expanded={mobileMenuOpen}
           aria-controls="savi-mobile-drawer"
@@ -498,14 +498,14 @@ export function SaviSidebar({
             role="dialog"
             aria-modal="true"
             aria-label="SAVI navigation"
-            className="savi-mobile-drawer relative flex h-full w-[min(88vw,340px)] flex-col overflow-y-auto border-r border-white/10 bg-[#111318] px-4 pb-6 text-white shadow-[18px_0_52px_rgba(0,0,0,0.42)]"
+            className="savi-mobile-drawer relative flex h-full w-[min(88vw,340px)] flex-col overflow-y-auto border-r border-white/10 bg-[var(--savi-bg-subtle)] px-4 pb-6 text-white shadow-[18px_0_52px_rgba(0,0,0,0.42)]"
           >
             <div className="flex items-center justify-between gap-3">
-              <Link href="/" onClick={closeMobileMenu} className="flex min-h-[44px] items-center gap-2 rounded-xl px-1 py-1" aria-label="SAVI home">
-                <img src="/brand/savi-logo.png" alt="SAVI" className="h-8 w-8 rounded-xl object-cover" />
+              <Link href="/" onClick={closeMobileMenu} className="flex min-h-[44px] items-center gap-2 rounded-lg px-1 py-1" aria-label="SAVI home">
+                <img src="/brand/savi-logo.png" alt="SAVI" className="h-8 w-8 rounded-lg object-cover" />
                 <span className="text-[15px] font-semibold">SAVI</span>
               </Link>
-              <button type="button" onClick={closeMobileMenu} className="grid h-[44px] w-[44px] place-items-center rounded-xl border border-white/12 text-white/72 hover:bg-white/10 hover:text-white" aria-label="Close navigation menu">
+              <button type="button" onClick={closeMobileMenu} className="savi-icon-button border border-white/10" aria-label="Close navigation menu">
                 <CloseIcon />
               </button>
             </div>
@@ -517,7 +517,7 @@ export function SaviSidebar({
             </nav>
 
             <div className="mt-5">
-              <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/32">Create</p>
+              <p className="px-3 pb-2 text-xs font-medium text-white/40">Create</p>
               <nav className="space-y-1">
                 {createItems.map((item) => (
                   <SidebarLink key={item.label} item={item} active={active === item.active} onClick={(event) => handleMobileModeClick(event, item.mode)} />
@@ -530,31 +530,31 @@ export function SaviSidebar({
             </div>
 
             <div className="mt-5 border-t border-white/10 pt-4">
-              <Link href="/credits" onClick={closeMobileMenu} className={`flex min-h-[44px] items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.06] ${active === 'Credits' ? 'bg-white/[0.08] text-white' : 'text-white/68'}`}>
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.035] text-violet-100"><CreditIcon /></span>
+              <Link href="/credits" onClick={closeMobileMenu} className={`flex min-h-[44px] items-center gap-3 rounded-lg border px-3 py-2 transition ${active === 'Credits' ? 'border-violet-300/25 bg-violet-400/[0.1] text-white' : 'border-transparent text-white/70 hover:bg-white/[0.045]'}`}>
+                <span className="grid h-8 w-8 shrink-0 place-items-center text-violet-200"><CreditIcon /></span>
                 <span>
-                  <span className="block text-[13px] font-semibold">Credits & Plans</span>
-                  <span className="block text-[11px] text-white/38">{formatCredits(credits)}</span>
+                  <span className="block text-sm font-semibold">Credits & Plans</span>
+                  <span className="block text-xs text-white/45">{formatCredits(credits)}</span>
                 </span>
               </Link>
-              <Link href="/settings" onClick={closeMobileMenu} className={`mt-1 flex min-h-[44px] items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-white/[0.06] ${active === 'Settings' ? 'bg-white/[0.08] text-white' : 'text-white/68'}`}>
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.035]"><GearIcon /></span>
-                <span className="text-[13px] font-semibold">Settings</span>
+              <Link href="/settings" onClick={closeMobileMenu} className={`mt-1 flex min-h-[44px] items-center gap-3 rounded-lg border px-3 py-2 transition ${active === 'Settings' ? 'border-violet-300/25 bg-violet-400/[0.1] text-white' : 'border-transparent text-white/70 hover:bg-white/[0.045]'}`}>
+                <span className="grid h-8 w-8 shrink-0 place-items-center"><GearIcon /></span>
+                <span className="text-sm font-semibold">Settings</span>
               </Link>
             </div>
 
             <div className="mt-auto border-t border-white/10 pt-4">
-              <button type="button" onClick={() => setProfileOpen((current) => !current)} className="flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-white/[0.06]" aria-label={profileOpen ? 'Close account menu' : user ? 'Open account menu' : 'Sign in to SAVI'} aria-expanded={profileOpen} aria-controls="savi-mobile-account-menu">
-                <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-violet-500 to-sky-400 text-[12px] font-bold text-white">
+              <button type="button" onClick={() => setProfileOpen((current) => !current)} className="flex min-h-[44px] w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-white/[0.045]" aria-label={profileOpen ? 'Close account menu' : user ? 'Open account menu' : 'Sign in to SAVI'} aria-expanded={profileOpen} aria-controls="savi-mobile-account-menu">
+                <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full bg-violet-600 text-xs font-bold text-white">
                   {user?.picture ? <img src={user.picture} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : user?.name?.charAt(0).toUpperCase() || 'S'}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-semibold text-white/86">{user?.name || 'Sign in to SAVI'}</span>
-                  <span className="block truncate text-[11px] text-white/38">{user ? formatCredits(credits) : 'Connect your workspace'}</span>
+                  <span className="block truncate text-sm font-semibold text-white/90">{user?.name || 'Sign in to SAVI'}</span>
+                  <span className="block truncate text-xs text-white/45">{user ? formatCredits(credits) : 'Connect your workspace'}</span>
                 </span>
                 <ChevronDownIcon />
               </button>
-              {profileOpen && <div id="savi-mobile-account-menu" className="mt-2 rounded-xl border border-white/[0.16] bg-[#0d1016] p-2 shadow-[0_18px_50px_rgba(0,0,0,0.42)]">{renderAccountMenu()}</div>}
+              {profileOpen && <div id="savi-mobile-account-menu" className="savi-elevated mt-2 p-2">{renderAccountMenu()}</div>}
             </div>
           </aside>
         </div>
@@ -583,19 +583,17 @@ function SidebarLink({
       href={item.href}
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
+      aria-label={item.hint ? `${item.label}, ${item.hint}` : item.label}
       title={collapsed ? item.label : undefined}
-      className={`group flex min-h-[44px] items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-medium transition ${collapsed ? 'justify-center px-0' : ''} ${
-        active ? `${collapsed ? 'bg-white/[0.08]' : 'border-l-2 border-violet-300/80 bg-white/[0.08] pl-[10px]'} text-white` : 'text-white/66 hover:bg-white/[0.075] hover:text-white'
+      className={`group flex min-h-[44px] items-center gap-3 rounded-lg border px-3 py-2 text-sm font-medium transition ${collapsed ? 'justify-center px-0' : ''} ${
+        active ? 'border-violet-300/25 bg-violet-400/[0.1] text-white shadow-[inset_0_0_18px_rgba(124,58,237,0.06)]' : 'border-transparent text-white/68 hover:bg-white/[0.045] hover:text-white'
       }`}
     >
-      <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg border ${
-        active ? 'border-white/18 bg-white/10 text-white' : 'border-white/10 bg-white/[0.035] text-white/62'
-      }`}>
+      <span className={`grid h-8 w-8 shrink-0 place-items-center ${active ? 'text-violet-200' : 'text-white/58 group-hover:text-white/80'}`}>
         {item.icon}
       </span>
       <span className={`min-w-0 ${collapsed ? 'hidden' : 'block'}`}>
         <span className="block truncate leading-5">{item.label}</span>
-        {item.hint && <span className="block truncate text-[11px] font-normal leading-4 text-white/38">{item.hint}</span>}
       </span>
     </Link>
   );
@@ -620,16 +618,16 @@ function ProfileMenuLink({
     <Link
       href={href}
       onClick={onClick}
-      className={`flex min-h-[44px] items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-semibold transition ${
-        active ? 'bg-white/12 text-white' : 'text-white/62 hover:bg-white/[0.06] hover:text-white'
+      className={`flex min-h-[44px] items-center gap-3 rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+        active ? 'border-violet-300/25 bg-violet-400/[0.1] text-white' : 'border-transparent text-white/68 hover:bg-white/[0.045] hover:text-white'
       }`}
     >
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.035]">
+      <span className="grid h-8 w-8 shrink-0 place-items-center">
         {icon}
       </span>
       <span className="min-w-0">
         <span className="block truncate">{label}</span>
-        <span className="block truncate text-[11px] font-normal text-white/34">{hint}</span>
+        <span className="block truncate text-xs font-normal text-white/42">{hint}</span>
       </span>
     </Link>
   );

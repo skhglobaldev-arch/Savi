@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { AskSaviChat } from '@/components/AskSaviChat';
 import { AllTools } from '@/components/AllTools';
 import { AllMediaLibrary } from '@/components/AllMediaLibrary';
-import { CreditBadge } from '@/components/CreditBadge';
+import { SaviAppShell, SaviTopBar } from '@/components/SaviAppShell';
 import { ArrowLeftIcon } from '@/components/SaviIcons';
-import { SaviSidebar, type SidebarMode } from '@/components/SaviSidebar';
+import type { SidebarMode } from '@/components/SaviSidebar';
 import { FileToolsStudio } from '@/components/file-tools/FileToolsStudio';
 import { ImageToolsStudio } from '@/components/image-tools/ImageToolsStudio';
 import { VideoToolsStudio } from '@/components/video-tools/VideoToolsStudio';
@@ -31,6 +31,8 @@ export default function WorkspacePage() {
   const [initialAskMessage, setInitialAskMessage] = useState('');
   const [initialAskLaunchKey, setInitialAskLaunchKey] = useState(0);
   const [newChatLaunchKey, setNewChatLaunchKey] = useState(0);
+  const [toolLaunchId, setToolLaunchId] = useState('');
+  const [toolLaunchKey, setToolLaunchKey] = useState(0);
 
   function handleCreditChange(_clientValue: number) {
     void refreshCredits();
@@ -44,6 +46,7 @@ export default function WorkspacePage() {
     const message = params.get('message');
     const templateId = params.get('template');
     const tool = params.get('tool');
+    const toolId = params.get('toolId');
     const view = params.get('view');
 
     if (view === 'media') {
@@ -72,7 +75,7 @@ export default function WorkspacePage() {
     }
 
     if (tool && ['Files', 'Images', 'Voice', 'Video'].includes(tool)) {
-      openToolTab(tool as ToolMode);
+      openToolTab(tool as ToolMode, undefined, toolId ?? undefined);
     }
   }, []);
 
@@ -83,9 +86,11 @@ export default function WorkspacePage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function openToolTab(nextMode: SidebarMode, template?: TemplateItem) {
+  function openToolTab(nextMode: SidebarMode, template?: TemplateItem, nextToolId?: string) {
     if (template) setSelectedTemplate(template);
     else setSelectedTemplate(undefined);
+    setToolLaunchId(nextToolId ?? '');
+    if (nextToolId) setToolLaunchKey((current) => current + 1);
     setMode(nextMode);
 
     if (typeof window !== 'undefined') {
@@ -102,6 +107,8 @@ export default function WorkspacePage() {
       } else {
         nextUrl.searchParams.set('tool', nextMode);
       }
+      if (nextToolId) nextUrl.searchParams.set('toolId', nextToolId);
+      else nextUrl.searchParams.delete('toolId');
       nextUrl.searchParams.delete('message');
       window.history.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
       window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
@@ -139,11 +146,11 @@ export default function WorkspacePage() {
     };
 
     if (tabMode === 'All Media') return <AllMediaLibrary />;
-    if (tabMode === 'All Tools') return <AllTools onOpenTool={openToolTab} />;
-    if (tabMode === 'Files') return <FileToolsStudio {...studioProps} />;
-    if (tabMode === 'Images') return <ImageToolsStudio {...studioProps} />;
-    if (tabMode === 'Voice') return <VoiceToolsStudio {...studioProps} />;
-    if (tabMode === 'Video') return <VideoToolsStudio {...studioProps} />;
+    if (tabMode === 'All Tools') return <AllTools onOpenTool={(nextMode, nextToolId) => openToolTab(nextMode, undefined, nextToolId)} />;
+    if (tabMode === 'Files') return <FileToolsStudio {...studioProps} launchToolId={toolLaunchId} launchKey={toolLaunchKey} />;
+    if (tabMode === 'Images') return <ImageToolsStudio {...studioProps} launchToolId={toolLaunchId} launchKey={toolLaunchKey} />;
+    if (tabMode === 'Voice') return <VoiceToolsStudio {...studioProps} launchToolId={toolLaunchId} launchKey={toolLaunchKey} />;
+    if (tabMode === 'Video') return <VideoToolsStudio {...studioProps} launchToolId={toolLaunchId} launchKey={toolLaunchKey} />;
     return null;
   }
 
@@ -157,50 +164,62 @@ export default function WorkspacePage() {
     };
 
     return (
-      <main className="savi-app-home h-screen overflow-hidden bg-black text-white">
-        <SaviSidebar active={mode} onOpenMode={handleSidebarMode} credits={credits} />
-        <section className="savi-content-shell savi-mobile-tool-offset flex h-screen min-h-0 flex-col overflow-hidden px-3 pb-3 sm:px-4 lg:px-5 lg:py-4">
-          <div className="mx-auto flex h-full min-h-0 w-full max-w-[1500px] flex-col gap-3">
-            {mode !== 'All Tools' && (
-              <div className="flex shrink-0 items-center justify-between gap-3 px-1 py-1">
-                <button
-                  type="button"
-                  onClick={returnToToolList}
-                  className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-white/12 bg-white/[0.06] px-3 py-2 text-xs font-bold text-white/72 transition hover:border-white/25 hover:bg-white/12 hover:text-white"
-                  aria-label={mode === 'All Media' ? 'Back to workspace' : 'Back to all tools'}
-                >
-                  <ArrowLeftIcon />
-                  <span>{mode === 'All Media' ? 'Workspace' : 'All tools'}</span>
-                </button>
-                <CreditBadge credits={credits} />
-              </div>
-            )}
-
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-5 pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.22)_transparent]">
-              {renderStudio(mode)}
-            </div>
+      <SaviAppShell
+        active={mode}
+        onOpenMode={handleSidebarMode}
+        credits={credits}
+        viewport="screen"
+        contentClassName="savi-mobile-content-offset flex min-h-0 flex-col"
+      >
+        <SaviTopBar
+          title={getWorkspaceTitle(mode)}
+          showOnMobile={mode !== 'All Tools'}
+          leading={mode !== 'All Tools' ? (
+            <button
+              type="button"
+              onClick={returnToToolList}
+              className="savi-button savi-button-ghost px-2.5"
+              aria-label={mode === 'All Media' ? 'Back to workspace' : 'Back to all tools'}
+            >
+              <ArrowLeftIcon />
+              <span>{mode === 'All Media' ? 'Workspace' : 'All tools'}</span>
+            </button>
+          ) : undefined}
+        />
+        <div className="min-h-0 flex-1 px-3 pb-3 pt-3 sm:px-4 lg:px-5">
+          <div className="mx-auto h-full min-h-0 w-full max-w-[1500px] overflow-y-auto overscroll-contain pb-5 pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.22)_transparent]">
+            {renderStudio(mode)}
           </div>
-        </section>
-      </main>
+        </div>
+      </SaviAppShell>
     );
   }
 
   return (
-    <main className="savi-app-home h-screen overflow-hidden bg-black text-white">
-      <SaviSidebar active={mode} onOpenMode={handleSidebarMode} credits={credits} />
-
-      <section className="savi-content-shell savi-mobile-content-offset relative h-screen overflow-hidden lg:pt-0">
-        <AskSaviChat
-          credits={credits}
-          onCreditsChange={handleCreditChange}
-          onOpenTool={openToolTab}
-          template={selectedTemplate}
-          templateLaunchKey={templateLaunchKey}
-          initialMessage={initialAskMessage}
-          initialMessageLaunchKey={initialAskLaunchKey}
-          newChatLaunchKey={newChatLaunchKey}
-        />
-      </section>
-    </main>
+    <SaviAppShell
+      active={mode}
+      onOpenMode={handleSidebarMode}
+      credits={credits}
+      viewport="screen"
+      contentClassName="savi-mobile-content-offset relative lg:pt-0"
+    >
+      <AskSaviChat
+        credits={credits}
+        onCreditsChange={handleCreditChange}
+        onOpenTool={openToolTab}
+        template={selectedTemplate}
+        templateLaunchKey={templateLaunchKey}
+        initialMessage={initialAskMessage}
+        initialMessageLaunchKey={initialAskLaunchKey}
+        newChatLaunchKey={newChatLaunchKey}
+      />
+    </SaviAppShell>
   );
+}
+
+function getWorkspaceTitle(mode: SidebarMode): string {
+  if (mode === 'All Media') return 'Library';
+  if (mode === 'All Tools') return 'All Tools';
+  if (mode === 'Ask AI') return 'Ask SAVI';
+  return mode === 'Video' ? 'Videos' : mode;
 }

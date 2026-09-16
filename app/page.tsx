@@ -1,7 +1,8 @@
 'use client';
 
 import { AskSaviChat } from '@/components/AskSaviChat';
-import { SaviSidebar, type SidebarMode } from '@/components/SaviSidebar';
+import { SaviAppShell } from '@/components/SaviAppShell';
+import type { SidebarMode } from '@/components/SaviSidebar';
 import { useAuthoritativeCredits } from '@/lib/savi/useAuthoritativeCredits';
 import type { TemplateItem } from '@/lib/templates';
 
@@ -26,11 +27,14 @@ export default function HomePage() {
   }
 
   return (
-    <main className="savi-app-home h-screen overflow-hidden bg-black text-white">
-      <SaviSidebar active="Ask AI" onOpenMode={openTool} credits={credits} />
-      <section className="savi-content-shell savi-mobile-content-offset relative h-screen overflow-hidden lg:pt-0">
-        <AskSaviChat credits={credits ?? 0} onCreditsChange={handleCreditChange} onOpenTool={openTool} />
-      </section>
-    </main>
+    <SaviAppShell
+      active="Ask AI"
+      onOpenMode={openTool}
+      credits={credits}
+      viewport="screen"
+      contentClassName="savi-mobile-content-offset relative lg:pt-0"
+    >
+      <AskSaviChat credits={credits ?? 0} onCreditsChange={handleCreditChange} onOpenTool={openTool} />
+    </SaviAppShell>
   );
 }

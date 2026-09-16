@@ -27,3 +27,11 @@ export function ToolboxIcon() {
 export function ArrowLeftIcon() {
   return <IconShell><path d="M19 12H5M11 6l-6 6 6 6" /></IconShell>;
 }
+
+export function SearchIcon() {
+  return <IconShell><circle cx="10.5" cy="10.5" r="5.5" /><path d="m15 15 4 4" /></IconShell>;
+}
+
+export function ArrowUpRightIcon() {
+  return <IconShell><path d="M7 17 17 7M9 7h8v8" /></IconShell>;
+}

@@ -80,7 +80,7 @@ export function OutputGallery({
             ))}
           </div>
         ) : (
-          <div className="grid min-h-[138px] place-items-center rounded-lg border border-dashed border-white/15 bg-white/[0.02] px-4 text-center text-sm font-bold text-white/45">
+          <div className="savi-empty-state min-h-[138px] px-4 font-semibold">
             {emptyText}
           </div>
         )}

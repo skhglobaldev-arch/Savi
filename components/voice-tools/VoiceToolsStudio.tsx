@@ -91,12 +91,16 @@ export function VoiceToolsStudio({
   credits,
   onCreditsChange,
   template,
-  templateLaunchKey = 0
+  templateLaunchKey = 0,
+  launchToolId,
+  launchKey = 0
 }: {
   credits: number | null;
   onCreditsChange: (credits: number) => void;
   template?: TemplateItem;
   templateLaunchKey?: number;
+  launchToolId?: string;
+  launchKey?: number;
 }) {
   const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
   const [mode, setMode] = useState<VoiceMode>('tts');
@@ -165,6 +169,19 @@ export function VoiceToolsStudio({
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [template, templateLaunchKey]);
+
+  useEffect(() => {
+    if (!launchToolId || launchKey === 0) return;
+    const nextTool = voiceToolOptions.find((tool) => tool.id === launchToolId);
+    if (!nextTool) return;
+    setMode(nextTool.id);
+    setIsToolOpen(true);
+    setText('');
+    setResult('');
+    setAudioUrl('');
+    setAudioName('');
+    setError('');
+  }, [launchKey, launchToolId]);
 
   async function generate() {
     setError('');

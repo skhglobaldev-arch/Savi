@@ -7,7 +7,7 @@ export function SaviAccountButton({ credits, className = '' }: { credits: number
   const { user, isLoading, signIn } = useSaviAuth();
 
   if (isLoading) {
-    return <div className={`h-9 w-24 animate-pulse rounded-full border border-white/10 bg-white/[0.05] ${className}`} aria-hidden="true" />;
+    return <div className={`savi-skeleton h-9 w-24 ${className}`} aria-hidden="true" />;
   }
 
   if (!user) {
@@ -16,7 +16,7 @@ export function SaviAccountButton({ credits, className = '' }: { credits: number
         <button
           type="button"
           onClick={() => signIn()}
-          className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-white/16 bg-white/[0.08] px-3.5 text-xs font-semibold text-white shadow-[0_12px_30px_rgba(0,0,0,0.22)] backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-violet-300/60 hover:bg-white/[0.14]"
+          className="savi-button savi-button-secondary"
         >
           <GoogleMark />
           Sign in
@@ -29,7 +29,7 @@ export function SaviAccountButton({ credits, className = '' }: { credits: number
   const initial = user.name.trim().charAt(0).toUpperCase() || 'S';
   return (
     <div className={`inline-flex h-9 max-w-[190px] items-center gap-2 rounded-full border border-white/14 bg-[#1a1a1a]/88 py-1 pl-1 pr-3 shadow-[0_12px_30px_rgba(0,0,0,0.22)] backdrop-blur-xl ${className}`} title={user.email}>
-      <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-violet-500 to-sky-400 text-[11px] font-bold text-white">
+      <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full bg-violet-600 text-xs font-bold text-white">
         {user.picture ? <img src={user.picture} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : initial}
       </span>
       <span className="min-w-0 truncate text-xs font-medium text-white/84">{user.name}</span>

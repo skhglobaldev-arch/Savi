@@ -206,8 +206,8 @@ function UploadDropzone({
       }}
       onDragLeave={() => setIsOver(false)}
       onDrop={onDrop}
-      className={`rounded-2xl border border-dashed p-4 text-center transition sm:p-6 ${
-        isOver ? 'border-cyan-200 bg-cyan-300/10' : 'border-white/15 bg-black/25'
+      className={`savi-upload-zone p-4 text-center sm:p-6 ${
+        isOver ? 'border-violet-300/50 bg-violet-300/10' : ''
       }`}
     >
       <input
@@ -218,7 +218,7 @@ function UploadDropzone({
         className="hidden"
         onChange={(event) => handleFiles(event.target.files)}
       />
-      <div aria-hidden="true" className="relative mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-white/15 bg-white/[0.06] before:absolute before:left-1/2 before:top-1/2 before:h-5 before:w-px before:-translate-x-1/2 before:-translate-y-1/2 before:bg-current after:absolute after:left-1/2 after:top-1/2 after:h-px after:w-5 after:-translate-x-1/2 after:-translate-y-1/2 after:bg-current">
+      <div aria-hidden="true" className="relative mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-white/15 bg-white/[0.06] before:absolute before:left-1/2 before:top-1/2 before:h-5 before:w-px before:-translate-x-1/2 before:-translate-y-1/2 before:bg-current after:absolute after:left-1/2 after:top-1/2 after:h-px after:w-5 after:-translate-x-1/2 after:-translate-y-1/2 after:bg-current">
       </div>
       <h3 className="mt-3 text-lg font-black sm:mt-4 sm:text-xl">{title}</h3>
       <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-white/55 sm:mt-2">{description}</p>
@@ -226,7 +226,7 @@ function UploadDropzone({
         type="button"
         disabled={busy}
         onClick={() => inputRef.current?.click()}
-        className="mt-4 min-h-[44px] rounded-lg bg-white px-6 py-3 text-sm font-black text-black transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-60 sm:mt-5"
+        className="savi-button savi-button-primary mt-4 sm:mt-5"
       >
         Choose PDF{multiple ? 's' : ''}
       </button>
@@ -238,12 +238,16 @@ export function FileToolsStudio({
   credits,
   onCreditsChange,
   template,
-  templateLaunchKey = 0
+  templateLaunchKey = 0,
+  launchToolId,
+  launchKey = 0
 }: {
   credits: number | null;
   onCreditsChange: (credits: number) => void;
   template?: TemplateItem;
   templateLaunchKey?: number;
+  launchToolId?: string;
+  launchKey?: number;
 }) {
   const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
   const [activeTool, setActiveTool] = useState<FileToolId>('merge');
@@ -372,6 +376,12 @@ export function FileToolsStudio({
 
     selectFileTool(nextTool, template.prompt);
   }, [template, templateLaunchKey]);
+
+  useEffect(() => {
+    if (!launchToolId || launchKey === 0) return;
+    const nextTool = fileTools.find((tool) => tool.id === launchToolId && tool.available !== false);
+    if (nextTool) selectFileTool(nextTool.id);
+  }, [launchKey, launchToolId]);
 
   function clearOutput() {
     revokeOwnedObjectUrl(output?.url);
