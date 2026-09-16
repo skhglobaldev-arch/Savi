@@ -20,7 +20,7 @@ export function LegalPageShell({
       <header className="border-b border-white/10 bg-[#101012]/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-5 px-5 py-4">
           <Link href="/" className="flex min-h-[44px] items-center gap-3" aria-label="SAVI home">
-            <img src="/brand/savi-logo.png" alt="SAVI" className="h-9 w-9 rounded-xl object-cover" />
+            <img src="/brand/savi-logo.png" alt="SAVI" className="h-9 w-auto max-w-9 object-contain" />
             <span>
               <span className="block text-sm font-semibold">SAVI</span>
               <span className="block text-[11px] text-white/42">by SKH.GLOBAL</span>

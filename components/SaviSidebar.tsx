@@ -338,7 +338,7 @@ export function SaviSidebar({
       <aside className={`savi-global-sidebar fixed inset-y-0 left-0 z-40 hidden flex-col overflow-visible border-r border-[var(--savi-border-subtle)] bg-[var(--savi-bg-subtle)] px-3 py-3 text-white lg:flex ${collapsed ? 'items-center' : ''}`}>
         <div className={`flex w-full items-center gap-3 ${collapsed ? 'justify-center' : 'justify-between'}`}>
           <Link href="/" className={`flex min-h-[44px] min-w-0 items-center gap-3 rounded-lg px-1.5 py-1.5 transition hover:bg-white/[0.045] ${collapsed ? 'justify-center' : ''}`} aria-label="SAVI home">
-            <img src="/brand/savi-logo.png" alt="SAVI" className="h-9 w-9 rounded-lg object-cover shadow-[0_0_18px_rgba(124,58,237,0.22)]" />
+            <img src="/brand/savi-logo.png" alt="SAVI" className="h-9 w-auto max-w-9 object-contain" />
             <span className={`min-w-0 transition ${collapsed ? 'hidden' : 'block'}`}>
               <span className="block truncate text-[16px] font-semibold leading-5 text-white">SAVI</span>
               <span className="block truncate text-xs font-medium text-white/45">by SKH.GLOBAL</span>
@@ -472,7 +472,7 @@ export function SaviSidebar({
 
       <header className="savi-mobile-bar fixed left-0 top-0 z-40 flex w-full items-center gap-2 border-b border-[var(--savi-border-subtle)] bg-[var(--savi-bg-subtle)]/95 px-3 text-white backdrop-blur-xl lg:hidden">
         <Link href="/" className="flex min-h-[44px] items-center gap-2 rounded-lg px-1 py-1" aria-label="SAVI home">
-          <img src="/brand/savi-logo.png" alt="SAVI" className="h-8 w-8 rounded-lg object-cover" />
+          <img src="/brand/savi-logo.png" alt="SAVI" className="h-8 w-auto max-w-8 object-contain" />
           <span className="text-[15px] font-semibold">SAVI</span>
         </Link>
         <button
@@ -502,7 +502,7 @@ export function SaviSidebar({
           >
             <div className="flex items-center justify-between gap-3">
               <Link href="/" onClick={closeMobileMenu} className="flex min-h-[44px] items-center gap-2 rounded-lg px-1 py-1" aria-label="SAVI home">
-                <img src="/brand/savi-logo.png" alt="SAVI" className="h-8 w-8 rounded-lg object-cover" />
+                <img src="/brand/savi-logo.png" alt="SAVI" className="h-8 w-auto max-w-8 object-contain" />
                 <span className="text-[15px] font-semibold">SAVI</span>
               </Link>
               <button type="button" onClick={closeMobileMenu} className="savi-icon-button border border-white/10" aria-label="Close navigation menu">

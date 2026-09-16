@@ -8,7 +8,7 @@ export function Header({ credits }: { credits?: number | null }) {
     <header className="savi-topbar savi-topbar-mobile">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
         <Link href="/" className="flex items-center gap-3">
-          <img src="/brand/savi-logo.png" alt="SAVI" className="h-8 w-8 rounded-lg object-cover" />
+          <img src="/brand/savi-logo.png" alt="SAVI" className="h-8 w-auto max-w-8 object-contain" />
           <div>
             <p className="text-sm font-semibold text-white">SAVI</p>
             <p className="text-[11px] font-medium text-white/42">by SKH.GLOBAL</p>

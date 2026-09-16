@@ -29,7 +29,6 @@ export default function HomePage() {
   return (
     <SaviAppShell
       active="Ask AI"
-      onOpenMode={openTool}
       credits={credits}
       viewport="screen"
       contentClassName="savi-mobile-content-offset relative lg:pt-0"
