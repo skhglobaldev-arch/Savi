@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from 'react';
 import { ArrowUpRightIcon, SearchIcon, ToolFileIcon, ToolImageIcon, ToolboxIcon, ToolVideoIcon, ToolVoiceIcon } from '@/components/SaviIcons';
+import { ToolPreview } from '@/components/ToolPreview';
 import { imageTools } from '@/components/image-tools/ImageToolsStudio';
 import { videoTools } from '@/components/video-tools/VideoToolsStudio';
 import { voiceToolOptions } from '@/components/voice-tools/VoiceToolsStudio';
@@ -23,6 +24,7 @@ export type SaviToolGalleryItem = {
   category: Exclude<ToolCategory, 'All'>;
   mode: ToolGroup['mode'];
   icon: ReactNode;
+  previewId: string;
 };
 
 const toolGroups: ToolGroup[] = [
@@ -51,12 +53,12 @@ const toolGroups: ToolGroup[] = [
 const groupByMode = Object.fromEntries(toolGroups.map((group) => [group.mode, group])) as Record<ToolGroup['mode'], ToolGroup>;
 
 export const saviToolGallery: SaviToolGalleryItem[] = [
-  ...imageTools.map((tool) => ({ ...tool, name: tool.title, category: 'Images' as const, mode: 'Images' as const, icon: groupByMode.Images.icon })),
-  ...videoTools.map((tool) => ({ ...tool, name: tool.title, category: 'Video' as const, mode: 'Video' as const, icon: groupByMode.Video.icon })),
-  ...voiceToolOptions.map((tool) => ({ id: tool.id, name: tool.label, description: tool.note, category: 'Voice' as const, mode: 'Voice' as const, icon: groupByMode.Voice.icon })),
+  ...imageTools.map((tool) => ({ ...tool, name: tool.title, category: 'Images' as const, mode: 'Images' as const, icon: groupByMode.Images.icon, previewId: tool.id })),
+  ...videoTools.map((tool) => ({ ...tool, name: tool.title, category: 'Video' as const, mode: 'Video' as const, icon: groupByMode.Video.icon, previewId: tool.id })),
+  ...voiceToolOptions.map((tool) => ({ id: tool.id, name: tool.label, description: tool.note, category: 'Voice' as const, mode: 'Voice' as const, icon: groupByMode.Voice.icon, previewId: tool.previewId })),
   ...fileTools
     .filter((tool) => tool.available !== false)
-    .map((tool) => ({ ...tool, name: tool.title, category: 'Files' as const, mode: 'Files' as const, icon: groupByMode.Files.icon }))
+    .map((tool) => ({ ...tool, name: tool.title, category: 'Files' as const, mode: 'Files' as const, icon: groupByMode.Files.icon, previewId: tool.id }))
 ];
 
 const categories: ToolCategory[] = ['All', 'Images', 'Video', 'Voice', 'Files'];
@@ -108,19 +110,21 @@ export function AllTools({ onOpenTool }: { onOpenTool: (mode: SidebarMode, toolI
         {matchingTools.length ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-label="SAVI tools">
             {matchingTools.map((tool) => (
-              <button key={`${tool.mode}-${tool.id}`} type="button" onClick={() => onOpenTool(tool.mode, tool.id)} className="savi-card savi-card-interactive group flex min-h-[184px] flex-col items-start p-4 text-left focus-visible:outline-offset-2">
-                <div className="flex w-full items-start justify-between gap-3">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-violet-300/20 bg-violet-500/10 text-violet-100" aria-hidden="true">{tool.icon}</span>
-                  <span className="savi-badge shrink-0 text-white/55">{tool.category}</span>
+            <button key={`${tool.mode}-${tool.id}`} type="button" onClick={() => onOpenTool(tool.mode, tool.id)} className="savi-card savi-card-interactive group flex min-h-[264px] flex-col overflow-hidden p-0 text-left focus-visible:outline-offset-2">
+                <div className="relative w-full border-b border-white/10 bg-black/20">
+                  <ToolPreview previewId={tool.previewId} compact interactive />
+                  <span className="absolute left-3 top-3 grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-black/55 text-violet-100 backdrop-blur-sm" aria-hidden="true">{tool.icon}</span>
                 </div>
-                <div className="mt-5 min-w-0">
-                  <h2 className="savi-card-title pr-6 text-white">{tool.name}</h2>
+                <div className="flex min-w-0 flex-1 flex-col p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <h2 className="savi-card-title text-white">{tool.name}</h2>
+                    <span className="savi-badge shrink-0 text-white/55">{tool.category}</span>
+                  </div>
                   <p className="mt-2 line-clamp-2 text-sm leading-6 text-white/55">{tool.description}</p>
+                  <span className="mt-4 flex items-center gap-1 text-xs font-semibold text-violet-200/85">
+                    Open <span className="transition-transform duration-150 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" aria-hidden="true"><ArrowUpRightIcon /></span>
+                  </span>
                 </div>
-                <span className="mt-auto flex w-full items-center justify-between border-t border-white/8 pt-4 text-xs font-semibold text-violet-200/85">
-                  Open tool
-                  <span className="transition-transform duration-150 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" aria-hidden="true"><ArrowUpRightIcon /></span>
-                </span>
               </button>
             ))}
           </div>

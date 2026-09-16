@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type PreviewKind = 'compare' | 'gallery' | 'audio' | 'video' | 'pdf' | 'script';
 
@@ -315,10 +315,10 @@ const previewMap: Record<string, PreviewConfig> = {
   },
 };
 
-export function ToolPreview({ previewId, compact = false }: { previewId: string; compact?: boolean }) {
+export function ToolPreview({ previewId, compact = false, interactive = false }: { previewId: string; compact?: boolean; interactive?: boolean }) {
   const config = previewMap[previewId] ?? previewMap.text_to_image;
 
-  if (compact) return <CompactPreview config={config} />;
+  if (compact) return <CompactPreview config={config} interactive={interactive} />;
 
   return (
     <div className="rounded-[26px] border border-violet-100 bg-white/65 p-3 shadow-[0_18px_55px_rgba(124,58,237,0.09)]">
@@ -329,30 +329,26 @@ export function ToolPreview({ previewId, compact = false }: { previewId: string;
         </div>
         <p className="max-w-[220px] text-right text-xs font-bold leading-5 text-slate-500">{config.caption}</p>
       </div>
-      <PreviewBody config={config} compact={false} />
+      <PreviewBody config={config} compact={false} interactive={interactive} />
     </div>
   );
 }
 
-function CompactPreview({ config }: { config: PreviewConfig }) {
+function CompactPreview({ config, interactive }: { config: PreviewConfig; interactive: boolean }) {
   return (
-    <div className="mt-3 overflow-hidden rounded-[14px] border border-violet-100 bg-white/70">
-      <PreviewBody config={config} compact />
+    <div className="overflow-hidden bg-black/10">
+      <PreviewBody config={config} compact interactive={interactive} />
     </div>
   );
 }
 
-function PreviewBody({ config, compact }: { config: PreviewConfig; compact: boolean }) {
+function PreviewBody({ config, compact, interactive }: { config: PreviewConfig; compact: boolean; interactive: boolean }) {
   if (config.kind === 'compare' && config.before && config.after) {
     return compact ? <AnimatedCompare before={config.before} after={config.after} /> : <BeforeAfter before={config.before} after={config.after} />;
   }
 
   if (config.kind === 'video' && config.media) {
-    return (
-      <div className={`relative mx-auto aspect-video w-full overflow-hidden bg-slate-950 ${compact ? 'max-h-[118px]' : 'max-w-3xl rounded-[20px]'}`}>
-        <video src={config.media} muted loop playsInline autoPlay preload="auto" className="h-full w-full object-cover" />
-      </div>
-    );
+    return <VideoPreview media={config.media} compact={compact} interactive={interactive} />;
   }
 
   if (config.kind === 'audio') {
@@ -366,12 +362,42 @@ function PreviewBody({ config, compact }: { config: PreviewConfig; compact: bool
   return <SlidePreview compact={compact} slides={config.slides || []} />;
 }
 
+function VideoPreview({ media, compact, interactive }: { media: string; compact: boolean; interactive: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const play = () => {
+    if (!interactive) return;
+    void videoRef.current?.play().catch(() => undefined);
+  };
+  const pause = () => {
+    if (!interactive) return;
+    videoRef.current?.pause();
+  };
+
+  if (failed) return <PreviewFallback label="Preview unavailable" compact={compact} />;
+
+  return (
+    <div className={`relative mx-auto aspect-video w-full overflow-hidden bg-slate-950 ${compact ? 'max-h-[148px]' : 'max-w-3xl rounded-lg'}`} onMouseEnter={play} onMouseLeave={pause} onFocus={play} onBlur={pause}>
+      <video ref={videoRef} src={media} muted loop playsInline autoPlay={!interactive} preload={interactive ? 'metadata' : 'auto'} onError={() => setFailed(true)} className="h-full w-full object-cover" />
+    </div>
+  );
+}
+
+function PreviewFallback({ label, compact }: { label: string; compact: boolean }) {
+  return (
+    <div className={`grid w-full place-items-center bg-gradient-to-br from-violet-950 via-slate-900 to-blue-950 text-xs font-semibold text-white/65 ${compact ? 'h-[148px]' : 'h-64 rounded-lg'}`}>
+      {label}
+    </div>
+  );
+}
+
 function AnimatedCompare({ before, after }: { before: string; after: string }) {
   return (
     <div className="relative aspect-[16/9] overflow-hidden bg-slate-100">
-      <img src={before} alt="" className="absolute inset-0 h-full w-full object-cover" />
+      <PreviewImage src={before} className="absolute inset-0 h-full w-full object-cover" />
       <div className="savi-compare-reveal absolute inset-0 overflow-hidden">
-        <img src={after} alt="" className="h-full w-full object-cover" />
+        <PreviewImage src={after} className="h-full w-full object-cover" />
       </div>
       <div className="savi-compare-handle absolute inset-y-0 w-0.5 bg-white shadow-[0_0_0_1px_rgba(124,58,237,0.32),0_0_22px_rgba(124,58,237,0.28)]" />
       <div className="absolute left-2 top-2 rounded-full bg-slate-950/75 px-2 py-0.5 text-[9px] font-black text-white">After</div>
@@ -402,9 +428,9 @@ function BeforeAfter({ before, after }: { before: string; after: string }) {
   return (
     <div className="mx-auto max-w-[560px]">
       <div className="relative aspect-[16/9] overflow-hidden rounded-[20px] border border-violet-100 bg-slate-100">
-        <img src={before} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        <PreviewImage src={before} className="absolute inset-0 h-full w-full object-cover" />
         <div className="absolute inset-0 overflow-hidden transition-[clip-path] duration-700 ease-in-out" style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }}>
-          <img src={after} alt="" className="h-full w-full object-cover" />
+          <PreviewImage src={after} className="h-full w-full object-cover" />
         </div>
         <div className="absolute inset-y-0 bg-white transition-[left] duration-700 ease-in-out shadow-[0_0_0_1px_rgba(124,58,237,0.3),0_0_30px_rgba(124,58,237,0.22)]" style={{ left: `${position}%`, width: 2 }} />
         <div className="absolute left-3 top-3 rounded-full bg-slate-950/80 px-3 py-1 text-xs font-black text-white">After</div>
@@ -503,7 +529,7 @@ function SlideCard({ slide, compact }: { slide: NonNullable<PreviewConfig['slide
   if (slide.src) {
     return (
       <div className="savi-slide-in relative h-full w-full">
-        <img src={slide.src} alt="" className="h-full w-full object-cover" />
+        <PreviewImage src={slide.src} className="h-full w-full object-cover" />
         <div className="absolute inset-x-2 bottom-2 rounded-full bg-white/86 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-violet-700 shadow-sm backdrop-blur">
           {slide.label}
         </div>
@@ -521,6 +547,13 @@ function SlideCard({ slide, compact }: { slide: NonNullable<PreviewConfig['slide
       </div>
     </div>
   );
+}
+
+function PreviewImage({ src, className }: { src: string; className: string }) {
+  const [failed, setFailed] = useState(false);
+  return failed
+    ? <div className={`${className} grid place-items-center bg-slate-900 text-[10px] font-semibold text-white/55`}>Preview unavailable</div>
+    : <img src={src} alt="" className={className} onError={() => setFailed(true)} />;
 }
 
 function AudioPreview({ compact, media }: { compact: boolean; media?: string }) {
