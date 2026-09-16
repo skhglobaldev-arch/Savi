@@ -511,7 +511,7 @@ export function ImageToolsStudio({
 }) {
   const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
   const [toolId, setToolId] = useState<ImageToolId>('text_to_image');
-  const [toolCategory, setToolCategory] = useState<'Create' | 'Edit' | 'Product'>('Create');
+  const [toolCategory, setToolCategory] = useState<'All' | 'Create' | 'Edit' | 'Product'>('All');
   const [isToolOpen, setIsToolOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [aspectRatio, setAspectRatio] = useState<(typeof aspectRatios)[number]>('1:1');
@@ -565,7 +565,7 @@ export function ImageToolsStudio({
   const pendingTextToImageRequestRef = useRef<PendingTextToImageRequest | null>(null);
 
   const selectedTool = imageTools.find((tool) => tool.id === toolId) ?? imageTools[0];
-  const visibleImageTools = imageTools.filter((tool) => imageToolCategories[tool.id] === toolCategory);
+  const visibleImageTools = imageTools.filter((tool) => toolCategory === 'All' || imageToolCategories[tool.id] === toolCategory);
   const selectedMockupPreset = mockupPresets.find((item) => item.id === mockupPresetId) ?? mockupPresets[0];
   const updateServerBalance = (response: { availableCredits?: unknown }) => {
     applyAuthoritativeBalance(response.availableCredits, onCreditsChange);
@@ -2153,11 +2153,11 @@ export function ImageToolsStudio({
         {!isToolOpen && (
           <ToolCategoryTabs
             value={toolCategory}
-            onChange={(value) => setToolCategory(value as 'Create' | 'Edit' | 'Product')}
-            options={(['Create', 'Edit', 'Product'] as const).map((category) => ({
+            onChange={(value) => setToolCategory(value as 'All' | 'Create' | 'Edit' | 'Product')}
+            options={(['All', 'Create', 'Edit', 'Product'] as const).map((category) => ({
               id: category,
               label: category,
-              count: imageTools.filter((tool) => imageToolCategories[tool.id] === category).length
+              count: category === 'All' ? imageTools.length : imageTools.filter((tool) => imageToolCategories[tool.id] === category).length
             }))}
           />
         )}

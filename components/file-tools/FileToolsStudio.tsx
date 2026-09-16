@@ -251,7 +251,7 @@ export function FileToolsStudio({
 }) {
   const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
   const [activeTool, setActiveTool] = useState<FileToolId>('merge');
-  const [toolGroup, setToolGroup] = useState<'PDF tools' | 'AI document'>('PDF tools');
+  const [toolGroup, setToolGroup] = useState<'All' | 'PDF tools' | 'AI document'>('All');
   const [isToolOpen, setIsToolOpen] = useState(false);
   const [mergeFiles, setMergeFiles] = useState<PdfFileItem[]>([]);
   const [pageFile, setPageFile] = useState<PdfFileItem | null>(null);
@@ -278,7 +278,7 @@ export function FileToolsStudio({
   const pagePreviewRequestRef = useRef<string | null>(null);
 
   const selectedTool = fileTools.find((tool) => tool.id === activeTool) ?? fileTools[0];
-  const visibleTools = fileTools.filter((tool) => tool.group === toolGroup && tool.available !== false);
+  const visibleTools = fileTools.filter((tool) => (toolGroup === 'All' || tool.group === toolGroup) && tool.available !== false);
   const selectedJpgPages = useMemo(() => jpgPages.filter((page) => page.selected), [jpgPages]);
   const selectedOrganizePages = useMemo(() => pageItems.filter((page) => page.selected), [pageItems]);
   const isBusy = Boolean(busyLabel);
@@ -1264,11 +1264,11 @@ export function FileToolsStudio({
         {!isToolOpen && (
           <ToolCategoryTabs
             value={toolGroup}
-            onChange={(value) => setToolGroup(value as 'PDF tools' | 'AI document')}
-            options={(['PDF tools', 'AI document'] as const).map((group) => ({
+            onChange={(value) => setToolGroup(value as 'All' | 'PDF tools' | 'AI document')}
+            options={(['All', 'PDF tools', 'AI document'] as const).map((group) => ({
               id: group,
               label: group,
-              count: fileTools.filter((tool) => tool.group === group && tool.available !== false).length
+              count: group === 'All' ? fileTools.filter((tool) => tool.available !== false).length : fileTools.filter((tool) => tool.group === group && tool.available !== false).length
             }))}
           />
         )}

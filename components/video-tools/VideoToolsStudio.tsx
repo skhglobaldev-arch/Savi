@@ -255,7 +255,7 @@ export function VideoToolsStudio({
 }) {
   const { user, isLoading: isAuthLoading, signIn } = useSaviAuth();
   const [toolId, setToolId] = useState<VideoToolId>('text_video');
-  const [toolCategory, setToolCategory] = useState<'Create' | 'Animate' | 'Promote'>('Create');
+  const [toolCategory, setToolCategory] = useState<'All' | 'Create' | 'Animate' | 'Promote'>('All');
   const [isToolOpen, setIsToolOpen] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState<ModelId>('omni');
@@ -280,7 +280,7 @@ export function VideoToolsStudio({
   const workAreaRef = useRef<HTMLDivElement | null>(null);
 
   const selectedTool = videoTools.find((tool) => tool.id === toolId) ?? videoTools[0];
-  const visibleVideoTools = videoTools.filter((tool) => videoToolCategories[tool.id] === toolCategory);
+  const visibleVideoTools = videoTools.filter((tool) => toolCategory === 'All' || videoToolCategories[tool.id] === toolCategory);
   const selectedModel = modelOptions.find((item) => item.id === model) ?? modelOptions[0];
   const quoteLabel = serverQuote === null
     ? user ? 'Price unavailable' : 'Sign in to view price'
@@ -853,11 +853,11 @@ export function VideoToolsStudio({
         {!isToolOpen && (
           <ToolCategoryTabs
             value={toolCategory}
-            onChange={(value) => setToolCategory(value as 'Create' | 'Animate' | 'Promote')}
-            options={(['Create', 'Animate', 'Promote'] as const).map((category) => ({
+            onChange={(value) => setToolCategory(value as 'All' | 'Create' | 'Animate' | 'Promote')}
+            options={(['All', 'Create', 'Animate', 'Promote'] as const).map((category) => ({
               id: category,
               label: category,
-              count: videoTools.filter((tool) => videoToolCategories[tool.id] === category).length
+              count: category === 'All' ? videoTools.length : videoTools.filter((tool) => videoToolCategories[tool.id] === category).length
             }))}
           />
         )}
