@@ -67,6 +67,18 @@ query FindAccountDeletionRequest($userId: UUID!) @auth(level: NO_ACCESS) {
   }
 }
 
+# Server-side operator tooling resolves a request identifier to its canonical
+# owner before loading the processor context. This is never client-accessible.
+query FindAccountDeletionRequestForOperator($requestId: UUID!) @auth(level: NO_ACCESS) {
+  accountDeletionRequests(where: { id: { eq: $requestId } }, limit: 1) {
+    id
+    userId
+    status
+    assetsTotal
+    assetsDeleted
+  }
+}
+
 mutation RequestAccountDeletion(
   $id: UUID!
   $userId: UUID!

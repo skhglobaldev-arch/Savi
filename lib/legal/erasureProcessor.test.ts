@@ -5,6 +5,7 @@ import {
   canWithdrawAccountDeletion,
   createAccountDeletionProcessor,
   getAccountDeletionBlockers,
+  reviewAccountDeletionContext,
   processAccountDeletionRequest,
   type AccountDeletionContext,
   type AccountDeletionProcessorDependencies
@@ -84,6 +85,39 @@ test('duplicate processor invocation completes once', async () => {
   assert.equal(second.status, ACCOUNT_DELETION_STATUSES.completed);
   assert.equal(fixture.getCompleteCount(), 1);
   assert.deepEqual(fixture.calls, ['claim', 'complete']);
+});
+
+test('an already processing request is not executed by a second processor', async () => {
+  const fixture = dependencies(context({
+    user: { id: 'user-1', provider: 'google', providerSubject: 'subject-1', email: 'user@example.com', displayName: 'User', status: 'deletion_processing' },
+    request: { id: 'request-1', userId: 'user-1', status: 'processing', assetsTotal: 1, assetsDeleted: 0 }
+  }));
+  const result = await createAccountDeletionProcessor(fixture.deps)('user-1');
+
+  assert.equal(result.status, ACCOUNT_DELETION_STATUSES.processing);
+  assert.deepEqual(result.blockers, ['processing_already_claimed']);
+  assert.deepEqual(fixture.calls, []);
+});
+
+test('review is non-destructive and identifies financial preservation and asset scope', () => {
+  const reviewed = reviewAccountDeletionContext(context({
+    assets: [
+      { id: 'asset-1', storagePath: 'users/user-1/assets/asset-1/file.png', status: 'available', storagePresent: true, recorded: true },
+      { id: 'asset-2', storagePath: 'users/user-1/assets/asset-2/file.png', status: 'erased', storagePresent: false, recorded: true }
+    ]
+  }));
+
+  assert.equal(reviewed.eligibleForProcessing, true);
+  assert.deepEqual(reviewed.assets, { recorded: 2, storageOnly: 0, alreadyErased: 1 });
+  assert.equal(reviewed.financialRecords, 'preserved');
+  assert.equal(reviewed.tombstone, 'created_on_completion');
+});
+
+test('completed and cancelled requests are not eligible for another execution', () => {
+  for (const status of [ACCOUNT_DELETION_STATUSES.completed, ACCOUNT_DELETION_STATUSES.cancelled]) {
+    const reviewed = reviewAccountDeletionContext(context({ request: { id: 'request-1', userId: 'user-1', status, assetsTotal: 0, assetsDeleted: 0 } }));
+    assert.equal(reviewed.eligibleForProcessing, false);
+  }
 });
 
 test('missing asset is tolerated and partial deletion retries safely', async () => {

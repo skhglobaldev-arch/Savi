@@ -50,6 +50,18 @@ export type AccountDeletionResult = {
   blockers: string[];
 };
 
+export type AccountDeletionReview = {
+  requestId: string;
+  userId: string;
+  requestStatus: string;
+  userStatus: string | null;
+  eligibleForProcessing: boolean;
+  blockers: string[];
+  assets: { recorded: number; storageOnly: number; alreadyErased: number };
+  financialRecords: 'preserved';
+  tombstone: 'created_on_completion';
+};
+
 export type AccountDeletionProcessorDependencies = {
   loadContext: (userId: string) => Promise<AccountDeletionContext>;
   claimProcessing: (input: {
@@ -137,6 +149,27 @@ export function isRetryableAccountDeletionStatus(status: string) {
   return RETRYABLE_STATUSES.has(status);
 }
 
+export function reviewAccountDeletionContext(context: AccountDeletionContext): AccountDeletionReview {
+  if (!context.request) throw new Error('DELETION_REQUEST_NOT_FOUND');
+  const blockers = getAccountDeletionBlockers(context);
+  const requestStatus = context.request.status;
+  return {
+    requestId: context.request.id,
+    userId: context.request.userId,
+    requestStatus,
+    userStatus: context.user?.status ?? null,
+    eligibleForProcessing: isRetryableAccountDeletionStatus(requestStatus) && requestStatus !== ACCOUNT_DELETION_STATUSES.processing && blockers.length === 0,
+    blockers: requestStatus === ACCOUNT_DELETION_STATUSES.processing ? [...blockers, 'processing_already_claimed'] : blockers,
+    assets: {
+      recorded: context.assets.filter((asset) => asset.recorded).length,
+      storageOnly: context.assets.filter((asset) => !asset.recorded).length,
+      alreadyErased: context.assets.filter((asset) => asset.status === 'erased' && !asset.storagePresent).length
+    },
+    financialRecords: 'preserved',
+    tombstone: 'created_on_completion'
+  };
+}
+
 function tombstoneEmail(userId: string) {
   return `deleted+${userId}@invalid.savi`;
 }
@@ -164,6 +197,14 @@ export function createAccountDeletionProcessor(dependencies: AccountDeletionProc
       };
     }
     if (!isRetryableAccountDeletionStatus(initialStatus)) throw new Error('DELETION_REQUEST_STATE_UNSUPPORTED');
+    if (initialStatus === ACCOUNT_DELETION_STATUSES.processing) {
+      return {
+        status: initialStatus,
+        assetsTotal: context.request.assetsTotal,
+        assetsDeleted: context.request.assetsDeleted,
+        blockers: ['processing_already_claimed']
+      };
+    }
 
     const blockers = getAccountDeletionBlockers(context);
     if (blockers.length) {
@@ -334,6 +375,10 @@ async function loadContext(userId: string): Promise<AccountDeletionContext> {
     generationJobs: Array.isArray(data.generationJobs) ? data.generationJobs : [],
     assets
   } as AccountDeletionContext;
+}
+
+export async function reviewAccountDeletionRequest(userId: string): Promise<AccountDeletionReview> {
+  return reviewAccountDeletionContext(await loadContext(userId));
 }
 
 async function defaultListStorageObjects(userId: string) {

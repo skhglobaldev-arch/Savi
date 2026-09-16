@@ -9,6 +9,7 @@
     "start": "next start",
     "dataconnect:compile:prod": "firebase --project prod --config firebase.production.json dataconnect:compile --service savi-production-607fd-service --location europe-west2",
     "production:preflight": "node scripts/production-preflight.mjs",
+    "account-deletion:review": "node --experimental-strip-types scripts/process-account-deletion.ts",
     "test:pdf": "node --experimental-strip-types --test lib/pdf/hybridPdf.test.ts lib/pdf/workflowState.test.ts",
     "test:security": "node --experimental-strip-types --test lib/savi/backendSecurity.test.ts lib/savi/rateLimitPolicy.test.ts",
     "test:security:runtime": "node -r sucrase/register --test lib/savi/rateLimitRuntime.test.ts",
