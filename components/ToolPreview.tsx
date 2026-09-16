@@ -197,10 +197,10 @@ const previewMap: Record<string, PreviewConfig> = {
     media: '/previews/radio-sample.wav'
   },
   voice_radio: {
-    kind: 'audio',
+    kind: 'video',
     title: 'Radio Talk AI',
     caption: 'Topic becomes a hosted radio segment.',
-    media: '/previews/radio-sample.wav'
+   media: '/previews/radio-talk-preview.mp4'
   },
   text_video: {
     kind: 'video',
