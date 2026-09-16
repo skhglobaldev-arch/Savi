@@ -8,6 +8,7 @@ import type { TemplateItem } from '@/lib/templates';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 import { createSaviRadioScript, type SaviRadioFormat, type SaviRadioLength } from '@/lib/voice/radioScript';
+import { SAVI_TTS_TONES, SAVI_TTS_VOICES } from '@/lib/ai/toolAssistant';
 import {
   applyAuthoritativeBalance,
   clearSaviClientRequestId,
@@ -16,29 +17,12 @@ import {
 } from '@/lib/savi/clientGeneration';
 
 type VoiceMode = 'tts' | 'radio';
-type ToneId = 'natural' | 'warm' | 'excited' | 'formal' | 'whisper' | 'cinematic';
+type ToneId = (typeof SAVI_TTS_TONES)[number]['id'];
 type RadioFormatId = SaviRadioFormat;
 type RadioLengthId = SaviRadioLength;
 
-const voices = [
-  { id: 'kore', name: 'Kore', feel: 'Warm female narrator' },
-  { id: 'aoede', name: 'Aoede', feel: 'Smooth storyteller' },
-  { id: 'callirrhoe', name: 'Callirrhoe', feel: 'Clear and elegant' },
-  { id: 'despina', name: 'Despina', feel: 'Precise presenter' },
-  { id: 'puck', name: 'Puck', feel: 'Bright radio host' },
-  { id: 'charon', name: 'Charon', feel: 'Deep news voice' },
-  { id: 'zephyr', name: 'Zephyr', feel: 'Friendly guide' },
-  { id: 'fenrir', name: 'Fenrir', feel: 'Dramatic trailer voice' }
-] as const;
-
-const tones: Array<{ id: ToneId; label: string; note: string; rate: number; pitch: number }> = [
-  { id: 'natural', label: 'Natural', note: 'Balanced and clean', rate: 1, pitch: 1 },
-  { id: 'warm', label: 'Warm', note: 'Soft and friendly', rate: 0.94, pitch: 1.02 },
-  { id: 'excited', label: 'Excited', note: 'Upbeat and energetic', rate: 1.08, pitch: 1.08 },
-  { id: 'formal', label: 'Formal', note: 'Calm business delivery', rate: 0.92, pitch: 0.96 },
-  { id: 'whisper', label: 'Whisper', note: 'Quiet intimate read', rate: 0.82, pitch: 0.9 },
-  { id: 'cinematic', label: 'Cinematic', note: 'Trailer style pacing', rate: 0.86, pitch: 0.86 }
-];
+const voices = SAVI_TTS_VOICES;
+const tones = SAVI_TTS_TONES;
 
 const radioFormats: Array<{ id: RadioFormatId; label: string; note: string }> = [
   { id: 'solo', label: 'Solo host', note: 'A complete hosted segment' },

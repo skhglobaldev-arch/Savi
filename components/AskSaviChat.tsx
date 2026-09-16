@@ -11,6 +11,18 @@ import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 import { createSaviRadioScript } from '@/lib/voice/radioScript';
 import { SAVI_EXTRACT_IMAGES_AVAILABLE } from '@/lib/pdf/workflowState';
 import {
+  canonicalTtsTone,
+  canonicalTtsVoice,
+  SAVI_IMAGE_VIDEO_OPTIONS,
+  SAVI_TTS_TONES,
+  SAVI_TTS_VOICES,
+  ttsStyle,
+  type SaviImageVideoDuration,
+  type SaviImageVideoRatio,
+  type SaviTtsTone,
+  type SaviTtsVoice
+} from '@/lib/ai/toolAssistant';
+import {
   applyAuthoritativeBalance,
   clearSaviClientRequestId,
   createSaviClientRequestId,
@@ -64,9 +76,11 @@ type AgentPlanResponse = SaviAgentPlan & {
 
 type ToolDraft = {
   tool: 'voice_tts' | 'radio_talk';
-  stage: 'text' | 'settings';
+  stage: 'text' | 'voice' | 'settings';
   text?: string;
   language?: 'fa' | 'en';
+  voice?: SaviTtsVoice;
+  tone?: SaviTtsTone;
 };
 
 type ChatResult = {
@@ -627,24 +641,6 @@ function extractQuotedOrLongText(message: string) {
   return '';
 }
 
-function voiceSettingsFromText(message: string) {
-  const lower = message.toLowerCase();
-  const wantsMale = /(male|man|mard|مرد|پسر)/.test(lower);
-  const wantsFemale = /(female|woman|zan|زن|دختر)/.test(lower);
-  const voice = wantsMale ? 'Puck' : wantsFemale ? 'Kore' : 'Kore';
-
-  const tone = /(formal|رسمی|جدی)/.test(lower)
-    ? 'formal'
-    : /(excited|fast|سریع|هیجانی|انرژ)/.test(lower)
-      ? 'excited'
-      : /(calm|slow|warm|آرام|ملایم|گرم)/.test(lower)
-        ? 'warm calm'
-        : 'natural';
-
-  const speed = /(fast|سریع)/.test(lower) ? 'fast pace' : /(slow|آرام)/.test(lower) ? 'slow pace' : 'normal pace';
-  return { voice, style: `${tone}, ${speed}, clear natural delivery` };
-}
-
 function actionFromTemplate(template: TemplateItem, prompt: string): PendingAction {
   if (template.inputType === 'PDF') {
     return {
@@ -914,6 +910,7 @@ export function AskSaviChat({
   const [showQuickMenu, setShowQuickMenu] = useState(false);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [uploadError, setUploadError] = useState('');
+  const [guidedVideoAction, setGuidedVideoAction] = useState<PendingAction | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const actionAttachmentStoreRef = useRef<Record<string, ChatAttachment[]>>({});
@@ -1113,6 +1110,7 @@ export function AskSaviChat({
     setShowQuickMenu(false);
     actionAttachmentStoreRef.current = {};
     pendingUploadActionRef.current = null;
+    setGuidedVideoAction(null);
     recentAttachmentsRef.current = { image: [], pdf: [], video: [], audio: [], file: [] };
     setRunningActionId(null);
   }
@@ -1132,6 +1130,7 @@ export function AskSaviChat({
     setUploadError('');
     actionAttachmentStoreRef.current = {};
     pendingUploadActionRef.current = null;
+    setGuidedVideoAction(null);
     recentAttachmentsRef.current = { image: [], pdf: [], video: [], audio: [], file: [] };
     setRunningActionId(null);
   }
@@ -1246,16 +1245,63 @@ export function AskSaviChat({
     const videoReferences = newAttachments.filter((item) => item.kind === 'image' || item.kind === 'video');
     if (pending.tool === 'video_studio' && videoReferences.length) {
       pendingUploadActionRef.current = null;
-      addPendingAction({
+      beginGuidedImageVideo({
         ...pending,
-        id: makeId(),
-        canRunInChat: true,
         attachments: videoReferences.slice(0, 3),
-        attachmentIds: videoReferences.slice(0, 3).map((item) => item.id),
-        reason: localizedText(pending.language || userLanguage(pending.prompt), 'رفرنس آماده است. ویدئو را همین‌جا می‌سازم.', 'Your reference is ready. I can create the video here.'),
-        intro: pending.reason
+        attachmentIds: videoReferences.slice(0, 3).map((item) => item.id)
       });
     }
+  }
+
+  function beginGuidedImageVideo(action: PendingAction) {
+    const language = action.language || userLanguage(action.prompt);
+    setGuidedVideoAction({
+      ...action,
+      id: makeId(),
+      canRunInChat: true,
+      aspectRatio: undefined,
+      duration: undefined,
+      quality: '720'
+    });
+    addAssistantMessage(
+      localizedText(language, 'عکس آماده است. نسبت تصویر ویدئو را انتخاب کن.', 'Your image is ready. Choose the video shape.'),
+      ['Vertical 9:16', 'Wide 16:9']
+    );
+  }
+
+  function advanceGuidedImageVideo(choice: string) {
+    if (!guidedVideoAction) return false;
+    const language = guidedVideoAction.language || userLanguage(guidedVideoAction.prompt);
+    const ratio = choice.includes('9:16') ? '9:16' : choice.includes('16:9') ? '16:9' : undefined;
+    if (!guidedVideoAction.aspectRatio && ratio) {
+      setGuidedVideoAction({ ...guidedVideoAction, aspectRatio: ratio as SaviImageVideoRatio });
+      addAssistantMessage(localizedText(language, 'مدت ویدئو را انتخاب کن.', 'Choose the video length.'), SAVI_IMAGE_VIDEO_OPTIONS.durations.map((duration) => `${duration} seconds`));
+      return true;
+    }
+
+    const duration = SAVI_IMAGE_VIDEO_OPTIONS.durations.find((item) => choice.includes(item));
+    if (!guidedVideoAction.duration && duration) {
+      setGuidedVideoAction({ ...guidedVideoAction, duration });
+      addAssistantMessage(
+        localizedText(language, 'حرکت را خودت بنویس یا یکی از پیشنهادها را انتخاب کن.', 'Describe the movement, or choose a suggestion.'),
+        ['Slow camera push-in', 'Gentle orbit', 'Use the motion from my request']
+      );
+      return true;
+    }
+
+    const prompt = choice === 'Use the motion from my request' ? guidedVideoAction.prompt : choice;
+    const readyAction: PendingAction = {
+      ...guidedVideoAction,
+      prompt,
+      aspectRatio: guidedVideoAction.aspectRatio || '9:16',
+      duration: guidedVideoAction.duration || '6',
+      quality: '720',
+      reason: localizedText(language, 'تنظیمات آماده است. بعد از بررسی هزینه، فقط با تایید تو ویدئو ساخته می‌شود.', 'Settings are ready. After the credit check, video generation starts only when you confirm.'),
+      intro: localizedText(language, 'ویدئوی تصویری آماده بررسی است.', 'Your image-to-video request is ready for review.')
+    };
+    setGuidedVideoAction(null);
+    void addPendingAction(readyAction);
+    return true;
   }
 
   async function submit() {
@@ -1328,6 +1374,8 @@ export function AskSaviChat({
       return;
     }
 
+    if (guidedVideoAction && advanceGuidedImageVideo(clean)) return;
+
     if (toolDraft) {
       handleDraftReply(clean);
       return;
@@ -1358,18 +1406,29 @@ export function AskSaviChat({
             const language = action.language || userLanguage(clean);
             const expectedText = plan.missingInput === 'text';
             if (expectedText) {
-              setToolDraft({ tool: action.tool, stage: 'text', language });
+              setToolDraft({
+                tool: action.tool,
+                stage: 'text',
+                language,
+                voice: plan.voice ? canonicalTtsVoice(plan.voice) : undefined,
+                tone: plan.style ? canonicalTtsTone(plan.style) : undefined
+              });
               addAssistantMessage(plan.reply, plan.quickReplies);
               return;
             }
 
             setToolDraft({
               tool: action.tool,
-              stage: 'settings',
+              stage: 'voice',
               text: action.prompt,
-              language
+              language,
+              voice: plan.voice ? canonicalTtsVoice(plan.voice) : undefined,
+              tone: plan.style ? canonicalTtsTone(plan.style) : undefined
             });
-            addAssistantMessage(plan.reply, plan.quickReplies);
+            addAssistantMessage(
+              localizedText(language, 'متن آماده است. صدای واقعی موردنظرت را انتخاب کن.', 'Your text is ready. Choose the exact voice you want.'),
+              SAVI_TTS_VOICES.map((voice) => `${voice.name} — ${voice.feel}`)
+            );
             return;
           }
 
@@ -1384,6 +1443,14 @@ export function AskSaviChat({
         action = attachmentAction ?? detectAction(clean);
       } finally {
         setRunningActionId(null);
+      }
+    }
+
+    if (action.agentToolId === 'image_video') {
+      const references = action.attachments?.filter((item) => item.kind === 'image' || item.kind === 'video') ?? [];
+      if (references.length) {
+        beginGuidedImageVideo(action);
+        return;
       }
     }
 
@@ -1407,12 +1474,10 @@ export function AskSaviChat({
         return;
       }
       const language = action.language || userLanguage(clean);
-      setToolDraft({ tool: 'voice_tts', stage: 'settings', text, language });
+      setToolDraft({ tool: 'voice_tts', stage: 'voice', text, language });
       addAssistantMessage(
-        localizedText(language, 'متن را گرفتم. قبل از ساخت صدا، سبک صدا را انتخاب کن.', 'Got the text. Choose the voice style before I make the audio.'),
-        language === 'fa'
-          ? ['صدای زن، گرم، سرعت معمولی', 'صدای مرد، واضح، سرعت معمولی', 'صدای زن، آرام، کند', 'صدای مرد، پرانرژی، سریع']
-          : ['Female, warm, normal speed', 'Male, clear, normal speed', 'Female, calm, slow', 'Male, energetic, fast']
+        localizedText(language, 'متن را گرفتم. صدای واقعی موردنظرت را انتخاب کن.', 'Got the text. Choose the exact voice you want.'),
+        SAVI_TTS_VOICES.map((voice) => `${voice.name} — ${voice.feel}`)
       );
       return;
     }
@@ -1615,6 +1680,24 @@ export function AskSaviChat({
   async function addPendingAction(action: PendingAction) {
     const pricedAction = await withAuthoritativeQuote(action);
 
+    if (typeof pricedAction.cost === 'number' && credits !== null && credits < pricedAction.cost) {
+      const shortfall = pricedAction.cost - credits;
+      setMessages((current) => [
+        ...current,
+        {
+          id: makeId(),
+          role: 'assistant' as const,
+          content: localizedText(
+            pricedAction.language || userLanguage(pricedAction.prompt),
+            `برای این کار ${pricedAction.cost} اعتبار لازم است. موجودی فعلی ${credits} اعتبار است و ${shortfall} اعتبار کم داری. برای ادامه به Credits برو.`,
+            `This needs ${pricedAction.cost} credits. Your current balance is ${credits}, so you need ${shortfall} more. Open Credits to continue.`
+          ),
+          createdAt: Date.now()
+        }
+      ].slice(-MAX_MEMORY_MESSAGES));
+      return;
+    }
+
     const { attachments: actionFiles, ...safeAction } = pricedAction;
     if (actionFiles?.length) {
       actionAttachmentStoreRef.current[action.id] = actionFiles;
@@ -1637,21 +1720,30 @@ export function AskSaviChat({
 
     if (toolDraft.stage === 'text') {
       const language = toolDraft.language || userLanguage(clean);
-      setToolDraft({ ...toolDraft, stage: 'settings', text: clean });
+      setToolDraft({ ...toolDraft, stage: 'voice', text: clean });
       addAssistantMessage(
         localizedText(
           language,
-          toolDraft.tool === 'voice_tts' ? 'عالی. حالا سبک صدا را انتخاب کن.' : 'عالی. حالا سبک مجری رادیو را انتخاب کن.',
-          toolDraft.tool === 'voice_tts' ? 'Perfect. Now choose the voice, tone, and speed.' : 'Perfect. Now choose the radio host style.'
+          'عالی. حالا صدای واقعی موردنظرت را انتخاب کن.',
+          'Great. Choose the exact voice you want.'
         ),
-        toolDraft.tool === 'voice_tts'
-          ? ['Female, warm, normal speed', 'Male, clear, normal speed', 'Female, calm, slow', 'Male, energetic, fast']
-          : ['Warm radio host', 'News anchor', 'Energetic tech podcast']
+        SAVI_TTS_VOICES.map((voice) => `${voice.name} — ${voice.feel}`)
       );
       return;
     }
 
-    const settings = voiceSettingsFromText(clean);
+    if (toolDraft.stage === 'voice') {
+      const language = toolDraft.language || userLanguage(clean);
+      const voice = canonicalTtsVoice(clean);
+      setToolDraft({ ...toolDraft, stage: 'settings', voice });
+      addAssistantMessage(
+        localizedText(language, 'حالا لحن را انتخاب کن.', 'Now choose the tone.'),
+        SAVI_TTS_TONES.map((tone) => tone.label)
+      );
+      return;
+    }
+
+    const tone = canonicalTtsTone(clean);
     const title = toolDraft.tool === 'radio_talk' ? 'Radio Talk AI' : 'Text to Speech';
     const prompt = toolDraft.text || clean;
     const language = toolDraft.language || userLanguage(prompt);
@@ -1663,11 +1755,11 @@ export function AskSaviChat({
       title,
       mode: 'Voice',
       prompt,
-      reason: `Voice: ${settings.voice}. Style: ${settings.style}.`,
+      reason: `Voice: ${toolDraft.voice || canonicalTtsVoice(undefined)}. Style: ${ttsStyle(tone)}.`,
       canRunInChat: true,
       language,
-      voice: settings.voice,
-      style: settings.style,
+      voice: toolDraft.voice || canonicalTtsVoice(undefined),
+      style: ttsStyle(tone),
       radioSource: toolDraft.tool === 'radio_talk' ? 'topic' : undefined
     });
   }
@@ -2189,6 +2281,29 @@ export function AskSaviChat({
     void submitText(reply);
   }
 
+  function changePendingAction(messageId: string, action: PendingAction) {
+    if (action.agentToolId === 'image_video') {
+      setMessages((current) => updateMessage(current, messageId, { pendingAction: undefined }));
+      beginGuidedImageVideo(action);
+      return;
+    }
+    if (action.tool === 'voice_tts') {
+      setMessages((current) => updateMessage(current, messageId, { pendingAction: undefined }));
+      setToolDraft({
+        tool: 'voice_tts',
+        stage: 'voice',
+        text: action.prompt,
+        language: action.language,
+        voice: canonicalTtsVoice(action.voice),
+        tone: canonicalTtsTone(action.style)
+      });
+      addAssistantMessage(
+        localizedText(action.language || 'en', 'صدای واقعی موردنظرت را انتخاب کن.', 'Choose the exact voice you want.'),
+        SAVI_TTS_VOICES.map((voice) => `${voice.name} — ${voice.feel}`)
+      );
+    }
+  }
+
   return (
     <section className="relative min-h-[calc(100vh-64px)] overflow-hidden bg-transparent lg:min-h-screen">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-violet-500/[0.055] to-transparent" />
@@ -2301,6 +2416,16 @@ export function AskSaviChat({
                         >
                           {message.pendingAction.canRunInChat ? 'Confirm' : 'Open tool'}
                         </button>
+                        {(message.pendingAction.tool === 'voice_tts' || message.pendingAction.agentToolId === 'image_video') && (
+                          <button
+                            type="button"
+                            disabled={Boolean(runningActionId)}
+                            onClick={() => changePendingAction(message.id, message.pendingAction as PendingAction)}
+                            className="min-h-[44px] rounded-lg border border-white/10 bg-white/8 px-4 py-2 text-xs font-semibold text-white/62 hover:bg-white/14 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Change settings
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setMessages((current) => updateMessage(current, message.id, { pendingAction: undefined, content: 'Cancelled. Tell me the next thing you want to do.' }))}

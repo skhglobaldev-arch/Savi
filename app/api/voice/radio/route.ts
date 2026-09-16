@@ -10,13 +10,14 @@ import { runProtectedOperation } from '@/lib/savi/protectedOperations';
 import { SaviInfrastructureError } from '@/lib/savi/textToImageInfrastructure';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
+import { SAVI_TTS_VOICES } from '@/lib/ai/toolAssistant';
 
 export const runtime = 'nodejs';
 
 const MAX_SCRIPT_LENGTH = 12_000;
 const MAX_STYLE_LENGTH = 800;
 const DEFAULT_VOICE = 'Puck';
-const ALLOWED_VOICES = new Set(['Kore', 'Aoede', 'Callirrhoe', 'Despina', 'Puck', 'Charon', 'Zephyr', 'Fenrir']);
+const ALLOWED_VOICES = new Set(SAVI_TTS_VOICES.map((voice) => voice.name));
 
 type VoiceRequest = {
   script?: string;
