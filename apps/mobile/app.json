@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "SAVI",
+    "slug": "savi-mobile",
+    "scheme": "savi",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/brand/savi-icon.png",
+    "userInterfaceStyle": "dark",
+    "plugins": [
+      "expo-router",
+      "expo-web-browser",
+      "expo-secure-store"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "global.skh.savi"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#09090E",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/brand/savi-icon.png"
+    }
+  }
+}
