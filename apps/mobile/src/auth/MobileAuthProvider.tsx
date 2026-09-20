@@ -7,6 +7,7 @@ type MobileAuthContextValue = {
   user: MobileSaviUser | null;
   status: MobileAuthStatus;
   error: string | null;
+  accessToken: string | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
   restore: () => Promise<void>;
@@ -76,7 +77,7 @@ export function MobileAuthProvider({ children }: { children: ReactNode }) {
     setStatus('signed_out');
   }, [token]);
 
-  const value = useMemo(() => ({ user, status, error, signIn, signOut, restore }), [error, restore, signIn, signOut, status, user]);
+  const value = useMemo(() => ({ user, status, error, accessToken: token, signIn, signOut, restore }), [error, restore, signIn, signOut, status, token, user]);
   return <MobileAuthContext.Provider value={value}>{children}</MobileAuthContext.Provider>;
 }
 

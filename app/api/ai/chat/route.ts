@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import { completeSaviChatTurn, failSaviChatTurn, getSaviConversation, startSaviChatTurn } from '@/lib/ai/conversations';
+import { readSaviRequestSession } from '@/lib/auth/requestSession';
 import { GeminiUnavailableError, requestGeminiWithFallback } from '@/lib/ai/geminiResilience';
 import { getConfiguredTextModel, getConfiguredTextModels } from '@/lib/pricing/saviPricing';
 import { logOperational } from '@/lib/observability/logger';
@@ -19,6 +20,7 @@ type ChatRequest = {
   mode?: string;
   templateId?: string;
   clientRequestId?: string;
+  conversationId?: string;
   history?: Array<{ role?: 'user' | 'assistant'; content?: string }>;
 };
 
@@ -118,7 +120,7 @@ async function recordUsageSafely(input: Parameters<typeof recordFreeAiUsage>[0])
 }
 
 export async function POST(request: NextRequest) {
-  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  const session = readSaviRequestSession(request);
   if (!session) {
     return NextResponse.json({ error: 'Please sign in to chat with SAVI.', category: 'AUTH_REQUIRED' }, { status: 401 });
   }
@@ -132,6 +134,8 @@ export async function POST(request: NextRequest) {
   if (!rateLimit.allowed) return createSaviRateLimitResponse(rateLimit);
 
   const startedAt = Date.now();
+  let pendingTurn: { conversationId: string; assistantMessageId: string } | null = null;
+  let providerAttempted = false;
   try {
     const body = (await request.json().catch(() => ({}))) as ChatRequest;
     const message = body.message?.trim() ?? '';
@@ -139,6 +143,23 @@ export async function POST(request: NextRequest) {
     if (message.length > MAX_MESSAGE_LENGTH) {
       return NextResponse.json({ error: `Message is too long. Limit it to ${MAX_MESSAGE_LENGTH} characters for now.` }, { status: 400 });
     }
+
+    const clientRequestId = typeof body.clientRequestId === 'string' && body.clientRequestId.length <= 128
+      ? body.clientRequestId
+      : crypto.randomUUID();
+    const turn = await startSaviChatTurn(session, message, clientRequestId, typeof body.conversationId === 'string' ? body.conversationId : undefined);
+    if (turn.state === 'completed' && turn.response) return NextResponse.json({ response: turn.response, mode: 'cached', conversationId: turn.conversationId });
+    if (turn.state === 'pending') return NextResponse.json({ error: 'SAVI is still preparing this reply. Please try again shortly.', conversationId: turn.conversationId }, { status: 409 });
+    pendingTurn = turn;
+    const conversation = await getSaviConversation(session, turn.conversationId);
+    if (!conversation) return NextResponse.json({ error: 'Conversation not found.' }, { status: 404 });
+    const conversationId = turn.conversationId;
+    const persistedHistory = (conversation.messages || []).filter((entry) => entry.content).map(({ role, content }) => ({ role, content }));
+    const respond = async (response: string, mode: string) => {
+      await completeSaviChatTurn(conversationId, turn.assistantMessageId, response);
+      pendingTurn = null;
+      return NextResponse.json({ response, mode, conversationId });
+    };
 
     const now = new Date();
     const currentDate = now.toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -156,7 +177,7 @@ export async function POST(request: NextRequest) {
         durationMs: Date.now() - startedAt,
         metadata: { responseMode: 'continuity_no_provider' }
       });
-      return NextResponse.json({ response: createContinuityAnswer(message), mode: 'continuity' });
+      return respond(createContinuityAnswer(message), 'continuity');
     }
 
     const systemInstruction = [
@@ -183,7 +204,7 @@ export async function POST(request: NextRequest) {
             body.mode ? `Selected mode: ${body.mode === 'Ask AI' ? 'Ask SAVI' : body.mode}` : '',
             body.templateId ? `Selected template: ${body.templateId}` : '',
             `Current date: ${currentDate}`,
-            conversationContext(body.history),
+            conversationContext(persistedHistory),
             'Latest user message:',
             message
           ].filter(Boolean).join('\n')
@@ -197,6 +218,7 @@ export async function POST(request: NextRequest) {
     let resolvedModel = model;
     let providerRequestId: string | undefined;
     try {
+      providerAttempted = true;
       const provider = await requestGeminiWithFallback<GeminiChatResponse>({
         apiKey,
         models: getConfiguredTextModels(model),
@@ -221,7 +243,7 @@ export async function POST(request: NextRequest) {
         durationMs: Date.now() - startedAt,
         metadata: { responseMode: 'continuity_after_provider_failure' }
       });
-      return NextResponse.json({ response: createContinuityAnswer(message), mode: 'continuity' });
+      return respond(createContinuityAnswer(message), 'continuity');
     }
 
     const text = extractInteractionText(providerData);
@@ -242,9 +264,14 @@ export async function POST(request: NextRequest) {
       metadata: { responseMode: text ? 'provider' : 'continuity_after_empty_provider_response', groundingDetected: groundedRequests > 0 }
     });
 
-    if (!text) return NextResponse.json({ response: createContinuityAnswer(message), mode: 'continuity' });
-    return NextResponse.json({ response: text, mode: resolvedModel });
+    if (!text) return respond(createContinuityAnswer(message), 'continuity');
+    return respond(text, resolvedModel);
   } catch (error) {
+    // Once a provider request has begun, retain the pending turn if persistence
+    // fails so a client retry cannot silently invoke the provider twice.
+    if (pendingTurn && !providerAttempted) {
+      await failSaviChatTurn(pendingTurn.conversationId, pendingTurn.assistantMessageId).catch(() => undefined);
+    }
     logOperational('error', 'savi_ai_chat_unexpected_error');
     return NextResponse.json(createSaviUnexpectedErrorResponse(), { status: 500 });
   }

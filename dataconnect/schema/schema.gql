@@ -11,6 +11,28 @@ type SaviUser @table(name: "savi_users") @unique(fields: ["provider", "providerS
   lastLoginAt: Timestamp! @default(expr: "request.time")
 }
 
+# Conversations are canonical SAVI account data. They are written and read only
+# by authenticated server routes, never directly by a browser or mobile client.
+type ChatConversation @table(name: "chat_conversations") {
+  id: UUID! @default(expr: "uuidV4()")
+  userId: UUID!
+  user: SaviUser! @ref(fields: "userId", references: "id")
+  title: String!
+  createdAt: Timestamp! @default(expr: "request.time")
+  updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type ChatMessage @table(name: "chat_messages") @unique(fields: ["conversationId", "clientMessageId"]) @unique(fields: ["clientMessageId"]) {
+  id: UUID! @default(expr: "uuidV4()")
+  conversationId: UUID!
+  conversation: ChatConversation! @ref(fields: "conversationId", references: "id")
+  role: String!
+  content: String!
+  clientMessageId: String!
+  status: String! @default(value: "completed")
+  createdAt: Timestamp! @default(expr: "request.time")
+}
+
 type LegalConsent
   @table(name: "legal_consents")
   @unique(fields: ["userId", "consentType", "policyVersion"]) {

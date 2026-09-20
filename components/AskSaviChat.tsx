@@ -124,6 +124,7 @@ type ChatSession = {
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  remote?: boolean;
 };
 
 const CHAT_STORAGE_KEY = 'savi.ask.chat.v2';
@@ -926,6 +927,9 @@ export function AskSaviChat({
   const handledNewChatKey = useRef(0);
   const handledRouteChat = useRef(false);
   const submitInFlightRef = useRef(false);
+  // Server conversation IDs are deliberately separate from browser UI IDs so
+  // legacy local drafts remain harmless while new free-chat exchanges sync.
+  const serverConversationIdRef = useRef<string | null>(null);
 
   const isFreshWorkspace = !activeChatId && messages.length === 0;
 
@@ -950,6 +954,30 @@ export function AskSaviChat({
     setSavedOutputs(loadStoredOutputs());
     setChatHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!chatHydrated || !user) return;
+    let cancelled = false;
+    void fetch('/api/ai/chat/conversations')
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload: { conversations?: Array<{ id: string; title: string; createdAt: string; updatedAt: string }> } | null) => {
+        if (cancelled || !payload?.conversations) return;
+        const remote = payload.conversations.map((conversation) => ({
+          id: conversation.id,
+          title: conversation.title,
+          createdAt: Date.parse(conversation.createdAt),
+          updatedAt: Date.parse(conversation.updatedAt),
+          messages: [],
+          remote: true
+        }));
+        setChatSessions((current) => {
+          const local = current.filter((session) => !remote.some((conversation) => conversation.id === session.id));
+          return [...remote, ...local].sort((a, b) => b.updatedAt - a.updatedAt);
+        });
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [chatHydrated, user]);
 
   useEffect(() => {
     if (!chatHydrated || typeof window === 'undefined') return;
@@ -1097,6 +1125,7 @@ export function AskSaviChat({
   }, [chatHydrated, newChatLaunchKey]);
 
   function createNewChat() {
+    serverConversationIdRef.current = null;
     setActiveChatId('');
     setMessages([]);
     setInput('');
@@ -1116,8 +1145,21 @@ export function AskSaviChat({
   }
 
   function openChat(chatId: string) {
+    serverConversationIdRef.current = null;
     const session = chatSessions.find((item) => item.id === chatId);
     if (!session) return;
+    if (session.remote) {
+      void fetch(`/api/ai/chat/conversations/${encodeURIComponent(chatId)}`)
+        .then((response) => response.ok ? response.json() : null)
+        .then((payload: { conversation?: { messages?: Array<{ id: string; role: 'user' | 'assistant'; content: string; createdAt: string }> } } | null) => {
+          if (!payload?.conversation) return;
+          serverConversationIdRef.current = chatId;
+          setActiveChatId(session.id);
+          setMessages((payload.conversation.messages || []).map((message) => ({ ...message, createdAt: Date.parse(message.createdAt) })));
+        })
+        .catch(() => undefined);
+      return;
+    }
     setActiveChatId(session.id);
     setMessages(session.messages.slice(-MAX_MEMORY_MESSAGES));
     setInput('');
@@ -1782,10 +1824,11 @@ export function AskSaviChat({
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, mode: 'Ask AI', history, clientRequestId: createSaviClientRequestId() })
+        body: JSON.stringify({ message, mode: 'Ask AI', history, conversationId: serverConversationIdRef.current || undefined, clientRequestId: createSaviClientRequestId() })
       });
-      const data = (await response.json().catch(() => ({}))) as { response?: string; error?: string };
+      const data = (await response.json().catch(() => ({}))) as { response?: string; conversationId?: string; error?: string };
       if (!response.ok || !data.response) throw new Error(data.error || 'SAVI could not answer.');
+      if (data.conversationId) serverConversationIdRef.current = data.conversationId;
 
       setMessages((current) =>
         updateMessage(current, assistantId, {

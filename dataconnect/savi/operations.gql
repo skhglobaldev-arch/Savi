@@ -13,6 +13,134 @@ query FindSaviUserByProvider($provider: String!, $providerSubject: String!) @aut
   }
 }
 
+query ListChatConversations($userId: UUID!) @auth(level: NO_ACCESS) {
+  chatConversations(where: { userId: { eq: $userId } }, orderBy: [{ updatedAt: DESC }], limit: 50) {
+    id
+    userId
+    title
+    createdAt
+    updatedAt
+  }
+}
+
+query GetChatConversationForUser($userId: UUID!, $conversationId: UUID!) @auth(level: NO_ACCESS) {
+  chatConversations(where: { id: { eq: $conversationId }, userId: { eq: $userId } }, limit: 1) {
+    id
+    userId
+    title
+    createdAt
+    updatedAt
+  }
+  chatMessages(where: { conversationId: { eq: $conversationId } }, orderBy: [{ createdAt: ASC }], limit: 100) {
+    id
+    role
+    content
+    clientMessageId
+    status
+    createdAt
+  }
+}
+
+mutation CreateChatConversationWithMessage(
+  $conversationId: UUID!
+  $userMessageId: UUID!
+  $userId: UUID!
+  $title: String!
+  $content: String!
+  $clientMessageId: String!
+) @transaction @auth(level: NO_ACCESS) {
+  chatConversation_insert(data: {
+    id: $conversationId
+    userId: $userId
+    title: $title
+    updatedAt_expr: "request.time"
+  })
+  chatMessage_insert(data: {
+    id: $userMessageId
+    conversationId: $conversationId
+    role: "user"
+    content: $content
+    clientMessageId: $clientMessageId
+  })
+}
+
+mutation AppendChatTurn(
+  $userMessageId: UUID!
+  $conversationId: UUID!
+  $userId: UUID!
+  $content: String!
+  $clientMessageId: String!
+  $title: String!
+) @transaction @auth(level: NO_ACCESS) {
+  chatConversation_updateMany(
+    where: { id: { eq: $conversationId }, userId: { eq: $userId } }
+    data: { title: $title, updatedAt_expr: "request.time" }
+  ) @check(expr: "this == 1", message: "CHAT_CONVERSATION_NOT_FOUND")
+  chatMessage_insert(data: {
+    id: $userMessageId
+    conversationId: $conversationId
+    role: "user"
+    content: $content
+    clientMessageId: $clientMessageId
+  })
+}
+
+mutation CreateChatAssistantPlaceholder(
+  $assistantMessageId: UUID!
+  $conversationId: UUID!
+  $userId: UUID!
+  $assistantClientMessageId: String!
+) @transaction @auth(level: NO_ACCESS) {
+  chatConversation_updateMany(
+    where: { id: { eq: $conversationId }, userId: { eq: $userId } }
+    data: { updatedAt_expr: "request.time" }
+  ) @check(expr: "this == 1", message: "CHAT_CONVERSATION_NOT_FOUND")
+  chatMessage_insert(data: {
+    id: $assistantMessageId
+    conversationId: $conversationId
+    role: "assistant"
+    content: ""
+    clientMessageId: $assistantClientMessageId
+    status: "pending"
+  })
+}
+
+query FindChatTurnByClientMessageId($clientMessageId: String!, $assistantClientMessageId: String!) @auth(level: NO_ACCESS) {
+  userMessages: chatMessages(where: { clientMessageId: { eq: $clientMessageId } }, limit: 1) {
+    id
+    conversationId
+    content
+    status
+  }
+  assistantMessages: chatMessages(where: { clientMessageId: { eq: $assistantClientMessageId } }, limit: 1) {
+    id
+    conversationId
+    content
+    status
+  }
+}
+
+mutation ClaimFailedChatAssistant($assistantMessageId: UUID!, $conversationId: UUID!) @transaction @auth(level: NO_ACCESS) {
+  chatMessage_updateMany(
+    where: { id: { eq: $assistantMessageId }, conversationId: { eq: $conversationId }, status: { eq: "failed" } }
+    data: { status: "pending" }
+  ) @check(expr: "this == 1", message: "CHAT_ASSISTANT_NOT_RETRYABLE")
+}
+
+mutation CompleteChatAssistant($assistantMessageId: UUID!, $conversationId: UUID!, $content: String!) @transaction @auth(level: NO_ACCESS) {
+  chatMessage_updateMany(
+    where: { id: { eq: $assistantMessageId }, conversationId: { eq: $conversationId }, status: { eq: "pending" } }
+    data: { content: $content, status: "completed" }
+  ) @check(expr: "this == 1", message: "CHAT_ASSISTANT_NOT_PENDING")
+}
+
+mutation FailChatAssistant($assistantMessageId: UUID!, $conversationId: UUID!) @transaction @auth(level: NO_ACCESS) {
+  chatMessage_updateMany(
+    where: { id: { eq: $assistantMessageId }, conversationId: { eq: $conversationId }, status: { eq: "pending" } }
+    data: { status: "failed" }
+  ) @check(expr: "this == 1", message: "CHAT_ASSISTANT_NOT_PENDING")
+}
+
 query FindLegalConsent($userId: UUID!, $consentType: String!, $policyVersion: String!) @auth(level: NO_ACCESS) {
   legalConsents(
     where: {
@@ -304,6 +432,10 @@ mutation CompleteAccountDeletion(
   $tombstoneEmail: String!
   $metadata: String!
 ) @transaction @auth(level: NO_ACCESS) {
+  # Conversational content is personal account data, unlike retained financial
+  # records. Remove child messages before their parent conversations.
+  chatMessage_deleteMany(where: { conversation: { userId: { eq: $userId } } })
+  chatConversation_deleteMany(where: { userId: { eq: $userId } })
   saviUser_updateMany(
     where: { id: { eq: $userId }, status: { eq: "deletion_processing" } }
     data: {
