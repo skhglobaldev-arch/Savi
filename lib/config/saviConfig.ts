@@ -42,6 +42,24 @@ function addHttpsOrigin(missing: Set<string>) {
   }
 }
 
+function addMobileOAuthOrigin(missing: Set<string>) {
+  const origin = value('SAVI_MOBILE_OAUTH_ORIGIN');
+  if (!origin) {
+    missing.add('SAVI_MOBILE_OAUTH_ORIGIN');
+    return;
+  }
+
+  try {
+    const parsed = new URL(origin);
+    const localHostname = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '::1' || parsed.hostname === '[::1]';
+    if (parsed.protocol !== 'https:' || localHostname || parsed.pathname !== '/' || parsed.search || parsed.hash || parsed.username || parsed.password) {
+      missing.add('SAVI_MOBILE_OAUTH_ORIGIN');
+    }
+  } catch {
+    missing.add('SAVI_MOBILE_OAUTH_ORIGIN');
+  }
+}
+
 function addFirebaseRequirements(missing: Set<string>) {
   addRequired(missing, 'FIREBASE_PROJECT_ID');
   addRequired(missing, 'FIREBASE_STORAGE_BUCKET');
@@ -74,6 +92,7 @@ function missingFor(area: SaviConfigurationArea) {
     addRequired(missing, 'GOOGLE_CLIENT_ID');
     addRequired(missing, 'GOOGLE_CLIENT_SECRET');
     addHttpsOrigin(missing);
+    addMobileOAuthOrigin(missing);
   }
 
   if (area === 'firebase' || area === 'readiness' || area === 'webhook') addFirebaseRequirements(missing);

@@ -2,7 +2,7 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 
-import { mobileAuthCallbackUri, saviApiOrigin } from './config';
+import { mobileAuthCallbackUri, mobileOAuthOrigin, saviApiOrigin } from './config';
 import type { MobileSaviUser } from './types';
 
 const mobileSessionKey = 'savi.mobile.session.v1';
@@ -43,10 +43,11 @@ export async function currentMobileUser(token: string): Promise<MobileSaviUser |
 }
 
 export async function beginMobileGoogleSignIn(): Promise<{ token: string; user: MobileSaviUser }> {
+  if (!mobileOAuthOrigin) throw new Error('Mobile Google sign-in is unavailable.');
   const verifier = createVerifier();
   const challenge = await createChallenge(verifier);
   const state = Crypto.randomUUID().replace(/-/g, '');
-  const authorizationUrl = new URL(`${saviApiOrigin}/api/auth/mobile/google`);
+  const authorizationUrl = new URL(`${mobileOAuthOrigin}/api/auth/mobile/google`);
   authorizationUrl.searchParams.set('redirect_uri', mobileAuthCallbackUri);
   authorizationUrl.searchParams.set('code_challenge', challenge);
   authorizationUrl.searchParams.set('code_challenge_method', 'S256');

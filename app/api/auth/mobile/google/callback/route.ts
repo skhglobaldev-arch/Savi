@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { createMobileExchangeGrant, mobileCallbackUri, readMobileOAuthState } from '@/lib/auth/mobileSession';
+import { mobileGoogleCallbackUrl } from '@/lib/auth/mobileOAuthOrigin';
 import { isGoogleAuthConfigured, type SaviUser } from '@/lib/auth/session';
 import { assertSaviProductionConfiguration } from '@/lib/config/saviConfig';
 import { logOperational } from '@/lib/observability/logger';
@@ -47,7 +48,6 @@ export async function GET(request: NextRequest) {
   if (!code) return nativeRedirect(signedState.appState, 'authentication_failed');
 
   try {
-    const origin = new URL(process.env.NODE_ENV === 'production' ? process.env.SAVI_APP_ORIGIN! : request.url).origin;
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
         code,
         client_id: process.env.GOOGLE_CLIENT_ID!,
         client_secret: process.env.GOOGLE_CLIENT_SECRET!,
-        redirect_uri: `${origin}/api/auth/mobile/google/callback`,
+        redirect_uri: mobileGoogleCallbackUrl(),
         grant_type: 'authorization_code'
       })
     });

@@ -27,6 +27,8 @@ env:
     value: savi
   - variable: SAVI_APP_ORIGIN
     value: https://savi.skh.global
+  - variable: SAVI_MOBILE_OAUTH_ORIGIN
+    value: https://savi-production-607fd-web--savi-production-607fd.europe-west4.hosted.app
   - variable: SAVI_TRUSTED_PROXY
     value: "false"
   - variable: SAVI_COMMERCE_CATALOG_VERSION

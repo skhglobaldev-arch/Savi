@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { createMobileOAuthState, mobileCallbackUri } from '@/lib/auth/mobileSession';
+import { mobileGoogleCallbackUrl } from '@/lib/auth/mobileOAuthOrigin';
 import { isGoogleAuthConfigured } from '@/lib/auth/session';
 import { assertSaviProductionConfiguration } from '@/lib/config/saviConfig';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
@@ -25,10 +26,9 @@ export async function GET(request: NextRequest) {
       codeChallenge: request.nextUrl.searchParams.get('code_challenge') || '',
       appState: request.nextUrl.searchParams.get('state') || ''
     });
-    const origin = new URL(process.env.NODE_ENV === 'production' ? process.env.SAVI_APP_ORIGIN! : request.url).origin;
     const googleUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     googleUrl.searchParams.set('client_id', process.env.GOOGLE_CLIENT_ID!);
-    googleUrl.searchParams.set('redirect_uri', `${origin}/api/auth/mobile/google/callback`);
+    googleUrl.searchParams.set('redirect_uri', mobileGoogleCallbackUrl());
     googleUrl.searchParams.set('response_type', 'code');
     googleUrl.searchParams.set('scope', 'openid email profile');
     googleUrl.searchParams.set('state', signedState);
