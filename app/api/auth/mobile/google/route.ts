@@ -9,6 +9,10 @@ import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 
 export const runtime = 'nodejs';
 
+function wantsAuthorizationUrlJson(request: NextRequest) {
+  return request.headers.get('accept')?.includes('application/vnd.savi.mobile-oauth+json') ?? false;
+}
+
 export async function GET(request: NextRequest) {
   try {
     assertSaviProductionConfiguration('auth');
@@ -33,6 +37,12 @@ export async function GET(request: NextRequest) {
     googleUrl.searchParams.set('scope', 'openid email profile');
     googleUrl.searchParams.set('state', signedState);
     googleUrl.searchParams.set('prompt', 'select_account');
+    if (wantsAuthorizationUrlJson(request)) {
+      return NextResponse.json(
+        { authorizationUrl: googleUrl.toString() },
+        { headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
     return NextResponse.redirect(googleUrl);
   } catch {
     return NextResponse.json({ error: `Mobile authentication must return to ${mobileCallbackUri()}.` }, { status: 400 });

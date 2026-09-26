@@ -39,4 +39,15 @@ test('mobile OAuth start is isolated from normal mobile API traffic', () => {
   assert.match(auth, /mobileOAuthOrigin}\/api\/auth\/mobile\/google/);
   assert.match(auth, /saviApiOrigin}\/api\/auth\/mobile\/session/);
   assert.match(auth, /if \(!mobileOAuthOrigin\) throw new Error/);
+  assert.match(auth, /application\/vnd\.savi\.mobile-oauth\+json/);
+  assert.match(auth, /authorizationUrl\.origin !== 'https:\/\/accounts\.google\.com'/);
+  assert.match(auth, /openAuthSessionAsync\(await requestGoogleAuthorizationUrl/);
+});
+
+test('mobile Google start route keeps browser redirects while supporting the native authorization-url response', () => {
+  const route = readFileSync(new URL('../../app/api/auth/mobile/google/route.ts', import.meta.url), 'utf8');
+  assert.match(route, /application\/vnd\.savi\.mobile-oauth\+json/);
+  assert.match(route, /authorizationUrl: googleUrl\.toString\(\)/);
+  assert.match(route, /Cache-Control': 'no-store'/);
+  assert.match(route, /NextResponse\.redirect\(googleUrl\)/);
 });

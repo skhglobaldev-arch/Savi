@@ -27,6 +27,27 @@ async function readError(response: Response) {
   return typeof body.error === 'string' ? body.error : 'SAVI sign-in could not be completed.';
 }
 
+async function requestGoogleAuthorizationUrl(startUrl: URL) {
+  const response = await fetch(startUrl, {
+    headers: { Accept: 'application/vnd.savi.mobile-oauth+json' }
+  });
+  if (!response.ok) throw new Error(await readError(response));
+
+  const body = (await response.json().catch(() => ({}))) as { authorizationUrl?: unknown };
+  if (typeof body.authorizationUrl !== 'string') throw new Error('Google sign-in could not be started.');
+
+  let authorizationUrl: URL;
+  try {
+    authorizationUrl = new URL(body.authorizationUrl);
+  } catch {
+    throw new Error('Google sign-in could not be started.');
+  }
+  if (authorizationUrl.origin !== 'https://accounts.google.com' || authorizationUrl.pathname !== '/o/oauth2/v2/auth') {
+    throw new Error('Google sign-in could not be started.');
+  }
+  return authorizationUrl.toString();
+}
+
 export async function readStoredMobileSession() {
   return SecureStore.getItemAsync(mobileSessionKey);
 }
@@ -53,7 +74,7 @@ export async function beginMobileGoogleSignIn(): Promise<{ token: string; user: 
   authorizationUrl.searchParams.set('code_challenge_method', 'S256');
   authorizationUrl.searchParams.set('state', state);
 
-  const result = await WebBrowser.openAuthSessionAsync(authorizationUrl.toString(), mobileAuthCallbackUri);
+  const result = await WebBrowser.openAuthSessionAsync(await requestGoogleAuthorizationUrl(authorizationUrl), mobileAuthCallbackUri);
   if (result.type !== 'success') throw new Error(result.type === 'cancel' ? 'Google sign-in was cancelled.' : 'Google sign-in could not be completed.');
 
   const callback = new URL(result.url);
