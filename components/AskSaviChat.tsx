@@ -7,6 +7,7 @@ import type { SidebarMode } from '@/components/SaviSidebar';
 import { ToolStatus } from '@/components/SaviToolUI';
 import { recordMediaItem } from '@/lib/mediaLibrary';
 import { getSaviAgentTool, type SaviAgentPlan, type SaviAgentToolId } from '@/lib/ai/saviAgent';
+import { recordPersistedChatActivity } from '@/lib/ai/chatActivity';
 import { useSaviAuth } from '@/lib/auth/useSaviAuth';
 import { createSaviRadioScript } from '@/lib/voice/radioScript';
 import { SAVI_EXTRACT_IMAGES_AVAILABLE } from '@/lib/pdf/workflowState';
@@ -1015,18 +1016,16 @@ export function AskSaviChat({
     }
 
     setChatSessions((current) => {
-      const now = Date.now();
       const next = current.map((session) =>
         session.id === activeChatId
           ? {
               ...session,
               title: createChatTitle(messages),
-              updatedAt: messages.length ? now : session.updatedAt,
               messages: messages.slice(-MAX_MEMORY_MESSAGES)
             }
           : session
       );
-      return next.sort((a, b) => b.updatedAt - a.updatedAt);
+      return next;
     });
     if (hasRealMessages) {
       window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages.slice(-MAX_MEMORY_MESSAGES)));
@@ -1833,7 +1832,11 @@ export function AskSaviChat({
       });
       const data = (await response.json().catch(() => ({}))) as { response?: string; conversationId?: string; error?: string };
       if (!response.ok || !data.response) throw new Error(data.error || 'SAVI could not answer.');
-      if (data.conversationId) serverConversationIdRef.current = data.conversationId;
+      const conversationId = data.conversationId;
+      if (conversationId) {
+        serverConversationIdRef.current = conversationId;
+        setChatSessions((current) => recordPersistedChatActivity(current, activeChatId || conversationId, Date.now()));
+      }
 
       setMessages((current) =>
         updateMessage(current, assistantId, {
