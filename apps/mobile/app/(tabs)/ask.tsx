@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getMobileConversation, listMobileConversations, optimisticMessage, sendMobileChatMessage } from '@/src/chat/chatApi';
 import type { MobileChatMessage, MobileConversation } from '@/src/chat/types';
@@ -16,6 +17,7 @@ function dateLabel(value: string) {
 
 export default function AskSaviScreen() {
   const { accessToken } = useMobileAuth();
+  const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState('');
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MobileChatMessage[]>([]);
@@ -73,7 +75,7 @@ export default function AskSaviScreen() {
   };
 
   const empty = messages.length === 0;
-  return <View style={styles.screen}>
+  return <View style={[styles.screen, { paddingTop: Math.max(spacing.sm, insets.top + spacing.xs) }]}>
     <View style={styles.header}><View><Text style={styles.title}>{conversationId ? 'Ask SAVI' : 'New chat'}</Text><Text style={styles.subtitle}>{conversationId ? 'Continue your conversation' : 'Ask SAVI anything'}</Text></View><View style={styles.headerActions}><Pressable accessibilityRole="button" accessibilityLabel="Open chat history" onPress={() => { setHistoryVisible(true); void refreshHistory(); }} style={({ pressed }) => [styles.historyTrigger, pressed && styles.pressed]}><Ionicons name="time-outline" color={colors.textMuted} size={18} /><Text style={styles.historyTriggerText}>Chats</Text></Pressable><IconButton icon="create-outline" label="Start a new chat" onPress={startFreshDraft} muted /></View></View>
     {empty ? <View style={styles.empty}><View style={styles.emptyMark}><Ionicons name="sparkles" color={colors.violet} size={28} /></View><Text style={styles.emptyTitle}>Where should we start?</Text><Text style={styles.emptyCopy}>Tell SAVI what you want to make, understand, or organise.</Text><View style={styles.prompts}>{['Plan a launch video', 'Turn this into an image brief', 'Help me organise PDFs'].map((prompt) => <Pressable key={prompt} accessibilityRole="button" onPress={() => setDraft(prompt)} style={styles.prompt}><Text style={styles.promptText}>{prompt}</Text><Ionicons name="arrow-up-outline" color={colors.textMuted} size={16} /></Pressable>)}</View></View> : <FlatList ref={listRef} data={messages} keyExtractor={(message) => message.id} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled" renderItem={({ item }) => <View style={[styles.message, item.role === 'user' ? styles.userMessage : styles.assistantMessage, item.failed && styles.failedMessage]}><Text style={styles.messageRole}>{item.role === 'user' ? 'YOU' : 'SAVI'}</Text><Text style={styles.messageText}>{item.content}</Text>{item.failed ? <Pressable accessibilityRole="button" onPress={() => void send(messages.filter((message) => message.role === 'user').at(-1))} style={styles.retry}><Text style={styles.retryText}>Try again</Text></Pressable> : null}</View>} ListFooterComponent={sending ? <View style={styles.thinking}><ActivityIndicator color={colors.violet} /><Text style={styles.thinkingText}>SAVI is thinking</Text></View> : null} />}
     <KeyboardAvoidingView behavior={Platform.select({ ios: 'padding', default: undefined })} keyboardVerticalOffset={88}><Surface style={styles.composer}><TextInput accessibilityLabel="Ask SAVI message" editable={!sending} multiline onChangeText={setDraft} placeholder="Message SAVI..." placeholderTextColor={colors.textSubtle} style={styles.input} value={draft} /><View style={styles.controls}><IconButton icon="attach" label="Attachments are coming soon" muted /><Text style={styles.freeNote}>Chat is free</Text><Pressable accessibilityRole="button" accessibilityLabel="Send message" disabled={!draft.trim() || sending} onPress={() => void send()} style={[styles.send, (!draft.trim() || sending) && styles.sendDisabled]}>{sending ? <ActivityIndicator color={colors.text} size="small" /> : <Ionicons name="arrow-up" color={colors.text} size={19} />}</Pressable></View></Surface>{error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}</KeyboardAvoidingView>

@@ -1153,9 +1153,14 @@ export function AskSaviChat({
         .then((response) => response.ok ? response.json() : null)
         .then((payload: { conversation?: { messages?: Array<{ id: string; role: 'user' | 'assistant'; content: string; createdAt: string }> } } | null) => {
           if (!payload?.conversation) return;
+          const hydratedMessages = (payload.conversation.messages || []).map((message) => ({ ...message, createdAt: Date.parse(message.createdAt) }));
           serverConversationIdRef.current = chatId;
+          // The list deliberately contains metadata only. Hydrate its selected
+          // entry before activating it so the active-session effect never
+          // replaces the fetched transcript with that empty list placeholder.
+          setChatSessions((current) => current.map((item) => item.id === chatId ? { ...item, messages: hydratedMessages } : item));
           setActiveChatId(session.id);
-          setMessages((payload.conversation.messages || []).map((message) => ({ ...message, createdAt: Date.parse(message.createdAt) })));
+          setMessages(hydratedMessages);
         })
         .catch(() => undefined);
       return;
