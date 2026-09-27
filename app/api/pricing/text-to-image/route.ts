@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import { readSaviRequestSession } from '@/lib/auth/requestSession';
 import { getConfiguredTextToImageModel, quoteSaviPrice, SaviPricingError, SAVI_TEXT_TO_IMAGE_PROVIDER } from '@/lib/pricing/saviPricing';
 
 export const runtime = 'nodejs';
@@ -13,7 +13,7 @@ function referenceImageCount(value: string | null) {
 }
 
 export async function GET(request: NextRequest) {
-  const user = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  const user = readSaviRequestSession(request);
   if (!user) {
     return NextResponse.json(
       { error: 'Please sign in to view the current image price.', category: 'AUTH_REQUIRED' },

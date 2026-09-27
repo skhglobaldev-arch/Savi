@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import { readSaviRequestSession } from '@/lib/auth/requestSession';
 import { getAuthoritativeCreditBalance } from '@/lib/savi/textToImageInfrastructure';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
-  const user = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  const user = readSaviRequestSession(request);
   if (!user) {
     return NextResponse.json(
       { error: 'Please sign in to view credits.', category: 'AUTH_REQUIRED' },
