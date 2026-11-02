@@ -15,6 +15,7 @@ export default function RootLayout() {
           <Stack.Screen name="sign-in" />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="tool/[toolId]" />
+          <Stack.Screen name="privacy" />
         </Stack>
       </MobileAuthProvider>
     </SafeAreaProvider>

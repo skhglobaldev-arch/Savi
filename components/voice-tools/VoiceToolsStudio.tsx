@@ -1,5 +1,8 @@
 'use client';
 
+import { radioFormats, radioLengths, voiceToolOptions } from '@/lib/tools/catalog';
+export { voiceToolOptions } from '@/lib/tools/catalog';
+
 import { useEffect, useState, type ReactNode } from 'react';
 import { ToolPreview } from '@/components/ToolPreview';
 import { ToolActionBar, ToolFieldLabel, ToolHeader, ToolStatus } from '@/components/SaviToolUI';
@@ -24,23 +27,8 @@ type RadioLengthId = SaviRadioLength;
 const voices = SAVI_TTS_VOICES;
 const tones = SAVI_TTS_TONES;
 
-const radioFormats: Array<{ id: RadioFormatId; label: string; note: string }> = [
-  { id: 'solo', label: 'Solo host', note: 'A complete hosted segment' },
-  { id: 'news', label: 'News brief', note: 'Crisp anchor delivery' },
-  { id: 'podcast', label: 'Podcast talk', note: 'Relaxed conversational show' },
-  { id: 'story', label: 'Story show', note: 'Narrative radio episode' }
-];
 
-const radioLengths: Array<{ id: RadioLengthId; label: string; target: string }> = [
-  { id: 'short', label: 'Short', target: '45 to 60 seconds' },
-  { id: 'standard', label: 'Standard', target: '1 to 2 minutes' },
-  { id: 'long', label: 'Long', target: '3 to 4 minutes' }
-];
 
-export const voiceToolOptions = [
-  { id: 'tts' as const, label: 'Text to Speech', note: 'Read exact text with a chosen voice', previewId: 'voice_tts' },
-  { id: 'radio' as const, label: 'Radio Talk AI', note: 'Turn a topic into a hosted segment', previewId: 'voice_radio' }
-];
 
 const CLOSE_ACTIVE_TOOL_EVENT = 'savi-close-active-tool';
 

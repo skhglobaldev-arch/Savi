@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument } from 'pdf-lib';
-import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import { readSaviRequestSession } from '@/lib/auth/requestSession';
 import {
   SAVI_LOCAL_PDF_MODEL,
   SAVI_LOCAL_PDF_PROVIDER,
@@ -156,7 +156,7 @@ async function processPdf(action: PdfAction, files: File[], form: FormData): Pro
 }
 
 export async function POST(request: NextRequest) {
-  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  const session = readSaviRequestSession(request);
   if (!session) return NextResponse.json({ error: 'Please sign in before using this tool.', category: 'AUTH_REQUIRED' }, { status: 401 });
 
   const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'FILE_PROCESSING', identity: getSaviRequestIdentity(request, session.id) });

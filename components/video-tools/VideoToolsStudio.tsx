@@ -1,5 +1,8 @@
 'use client';
 
+import { type VideoToolId, videoTools, videoDurations as durations, videoRatios as ratios, videoQualities as qualities } from '@/lib/tools/catalog';
+export { videoTools } from '@/lib/tools/catalog';
+
 import { useEffect, useRef, useState } from 'react';
 import { OutputGallery, type OutputGalleryItem } from '@/components/OutputGallery';
 import { ToolSelect } from '@/components/ToolSelect';
@@ -17,7 +20,6 @@ import {
   revokeOwnedObjectUrl
 } from '@/lib/savi/clientGeneration';
 
-type VideoToolId = 'text_video' | 'story_video' | 'image_video' | 'first_last' | 'product_ad' | 'social_reel' | 'extend';
 type ModelId = 'omni';
 type DurationValue = '4' | '6' | '8';
 type RatioValue = '16:9' | '9:16';
@@ -39,71 +41,6 @@ type VideoStudioOutput = OutputGalleryItem & {
 
 const CLOSE_ACTIVE_TOOL_EVENT = 'savi-close-active-tool';
 
-export const videoTools: Array<{
-  id: VideoToolId;
-  title: string;
-  description: string;
-  promptPlaceholder: string;
-  imageSlots: number;
-  hiddenInstruction: string;
-}> = [
-  {
-    id: 'text_video',
-    title: 'Text to video',
-    description: 'Create a cinematic clip from a written idea.',
-    promptPlaceholder: 'Example: A premium SAVI workspace comes alive on a glass desk, violet-blue glow, slow camera push-in, soft keyboard clicks, elegant launch mood.',
-    imageSlots: 0,
-    hiddenInstruction: 'Generate a polished short video from text only with clear camera movement, subject, action, lighting, and audio direction.'
-  },
-  {
-    id: 'story_video',
-    title: 'Story Sketch Video',
-    description: 'Build a video sequence shot by shot, then continue from the previous shot.',
-    promptPlaceholder: 'Example: Shot 1 opens on a pomegranate tree at golden hour. Shot 2 follows the fruit falling. Shot 3 shows a child picking it up.',
-    imageSlots: 0,
-    hiddenInstruction: 'Create one short video shot in a consistent multi-shot story. Preserve visual continuity, camera language, lighting, subject identity, and narrative flow between shots.'
-  },
-  {
-    id: 'image_video',
-    title: 'Image to video',
-    description: 'Animate a product, person, scene, or character from references.',
-    promptPlaceholder: 'Example: Animate the uploaded product photo with a slow orbit, gentle light sweep, realistic reflections, and a clean final hero frame.',
-    imageSlots: 3,
-    hiddenInstruction: 'Use up to three reference images to preserve the subject, product, or character while animating the scene.'
-  },
-  {
-    id: 'first_last',
-    title: 'Start and end frame',
-    description: 'Control the first and last frame for a guided visual transition.',
-    promptPlaceholder: 'Example: Move naturally from the start frame to the end frame with the same subject, matching light, smooth camera movement, and no sudden style change.',
-    imageSlots: 3,
-    hiddenInstruction: 'Use the first image as the starting frame, the second image as the ending frame, and the optional third image as a style, subject, or product reference. Create a coherent transition.'
-  },
-  {
-    id: 'product_ad',
-    title: 'Product ad video',
-    description: 'Create a short ad with product shots, motion, voice direction, and CTA.',
-    promptPlaceholder: 'Example: Create an 8-second premium ad for this skincare jar: texture close-up, hand picks up product, soft water reflection, final clean beauty shot.',
-    imageSlots: 3,
-    hiddenInstruction: 'Use up to three references for the product, package, logo, or lifestyle scene. Build a premium product advertisement with clear hook, product reveal, benefit shot, and closing call to action.'
-  },
-  {
-    id: 'social_reel',
-    title: 'Social reel',
-    description: 'Vertical short-form content for Instagram, TikTok, or Shorts.',
-    promptPlaceholder: 'Example: Make a fast vertical reel: first-second hook, three quick visual beats, bold readable caption rhythm, smooth product reveal, trendy clean energy.',
-    imageSlots: 3,
-    hiddenInstruction: 'Use up to three references for the subject, product, or visual direction. Create a punchy vertical reel with quick visual beats, captions, motion, hook, and a clear ending.'
-  },
-  {
-    id: 'extend',
-    title: 'Extend video',
-    description: 'Continue an existing generated video with a natural next action.',
-    promptPlaceholder: 'Example: Continue the uploaded clip for 4 seconds with the same camera direction, lighting, and subject motion, ending on a calm polished final frame.',
-    imageSlots: 3,
-    hiddenInstruction: 'Use the uploaded video or image references to extend the previous video naturally. Continue the last movement and keep the style consistent.'
-  }
-];
 
 const videoToolCategories: Record<VideoToolId, 'Create' | 'Animate' | 'Promote'> = {
   text_video: 'Create',
@@ -119,9 +56,6 @@ const modelOptions: Array<{ id: ModelId; label: string; note: string }> = [
   { id: 'omni', label: 'SAVI Video', note: 'Current server-rendered video output' }
 ];
 
-const durations: DurationValue[] = ['4', '6', '8'];
-const ratios: RatioValue[] = ['16:9', '9:16'];
-const qualities: QualityValue[] = ['720'];
 
 const promptIdeas: Record<VideoToolId, string[]> = {
   text_video: ['A cinematic AI workspace opening on a clean desk', 'A luxury product reveal with soft purple light', 'A calm founder story in a modern studio'],

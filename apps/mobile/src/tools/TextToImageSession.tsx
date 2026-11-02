@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useMobileAuth } from '@/src/auth/MobileAuthProvider';
@@ -32,6 +32,7 @@ export function TextToImageSession({ onBack }: { onBack: () => void }) {
   const [result, setResult] = useState<TextToImageResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef<string | null>(null);
+  const executionLock = useRef(false);
 
   const resetForInput = useCallback(() => {
     requestIdRef.current = null;
@@ -69,7 +70,8 @@ export function TextToImageSession({ onBack }: { onBack: () => void }) {
   }, [accessToken, result]);
 
   const generate = useCallback(async () => {
-    if (!accessToken || !quote || !prompt.trim() || executing || insufficientCredits) return;
+    if (!accessToken || !quote || !prompt.trim() || executionLock.current || executing || insufficientCredits) return;
+    executionLock.current = true;
     setExecuting(true);
     setError(null);
     const clientRequestId = requestIdRef.current || createClientRequestId();
@@ -87,6 +89,7 @@ export function TextToImageSession({ onBack }: { onBack: () => void }) {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'SAVI could not generate this image.');
     } finally {
+      executionLock.current = false;
       setExecuting(false);
     }
   }, [accessToken, aspectRatio, executing, insufficientCredits, prompt, quality, quote]);
@@ -94,20 +97,19 @@ export function TextToImageSession({ onBack }: { onBack: () => void }) {
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: Math.max(insets.top, spacing.md) }]}>
-        <IconButton icon="chevron-back" label="Back to tools" onPress={onBack} muted />
+        <IconButton icon="chevron-back" label="Back to tools" onPress={executing ? undefined : onBack} muted />
         <View style={styles.headerCopy}><Text style={styles.headerTitle}>Text to Image</Text><Text style={styles.headerDetail}>Create one original image</Text></View>
       </View>
-      <KeyboardAvoidingView behavior={Platform.select({ ios: 'padding', default: undefined })} style={styles.keyboard}>
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing.xxl }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing.xxl }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Surface style={styles.intro}><View style={styles.introIcon}><Ionicons color={colors.violet} name="image-outline" size={24} /></View><View style={styles.introCopy}><Text style={styles.introTitle}>Describe what you want to see</Text><Text style={styles.introDetail}>SAVI confirms the current credit quote before anything is generated.</Text></View></Surface>
 
         <SectionLabel>Prompt</SectionLabel>
         <TextInput
           accessibilityLabel="Image prompt"
-          editable={!executing}
+          readOnly={executing}
           multiline
           maxLength={4000}
-          onChangeText={(value) => { setPrompt(value); resetForInput(); }}
+          onChangeText={(value) => { if (executionLock.current) return; setPrompt(value); resetForInput(); }}
           placeholder="A sunlit studio portrait of a ceramic vase..."
           placeholderTextColor={colors.textSubtle}
           style={styles.prompt}
@@ -117,8 +119,10 @@ export function TextToImageSession({ onBack }: { onBack: () => void }) {
         <Text style={styles.helper}>Use a clear subject, setting, and visual direction.</Text>
 
         <SectionLabel>Format</SectionLabel>
-        <OptionRow disabled={executing} label="Quality" options={qualities} selected={quality} onSelect={(value) => { setQuality(value as TextToImageQuality); resetForInput(); }} />
-        <OptionRow disabled={executing} label="Aspect ratio" options={aspectRatios} selected={aspectRatio} onSelect={(value) => { setAspectRatio(value as TextToImageAspectRatio); resetForInput(); }} />
+        <View pointerEvents={executing ? 'none' : 'auto'} accessibilityElementsHidden={executing} style={styles.optionsGroup}>
+        <OptionRow label="Quality" options={qualities} selected={quality} onSelect={(value) => { if (executionLock.current) return; setQuality(value as TextToImageQuality); resetForInput(); }} />
+        <OptionRow label="Aspect ratio" options={aspectRatios} selected={aspectRatio} onSelect={(value) => { if (executionLock.current) return; setAspectRatio(value as TextToImageAspectRatio); resetForInput(); }} />
+        </View>
 
         <Surface style={styles.quoteCard}>
           <View><Text style={styles.quoteLabel}>Current SAVI quote</Text><Text style={styles.quoteDetail}>{quoteState === 'loading' ? 'Checking current price...' : quoteState === 'error' ? 'Quote unavailable' : 'One image generation'}</Text></View>
@@ -140,23 +144,22 @@ export function TextToImageSession({ onBack }: { onBack: () => void }) {
 
         {result ? <View style={styles.resultSection}><SectionLabel>Result</SectionLabel><Surface style={styles.resultCard}>{resultSource ? <Image accessibilityLabel="Generated SAVI image" resizeMode="cover" source={resultSource} style={[styles.resultImage, aspectRatio === '9:16' && styles.portraitResult]} /> : null}<View style={styles.resultCopy}><Text style={styles.resultTitle}>Your image is ready</Text><Text style={styles.resultDetail}>{result.filename} · Private to your SAVI account</Text></View></Surface></View> : null}
       </ScrollView>
-      </KeyboardAvoidingView>
     </View>
   );
 }
 
-function OptionRow({ disabled, label, options, selected, onSelect }: { disabled: boolean; label: string; options: readonly string[]; selected: string; onSelect: (value: string) => void }) {
-  return <View style={styles.optionsSection}><Text style={styles.optionTitle}>{label}</Text><View style={styles.options}>{options.map((option) => <Pressable accessibilityRole="button" accessibilityState={{ disabled, selected: option === selected }} disabled={disabled} key={option} onPress={() => onSelect(option)} style={[styles.option, option === selected && styles.optionSelected, disabled && styles.optionDisabled]}><Text style={[styles.optionText, option === selected && styles.optionTextSelected]}>{option}</Text></Pressable>)}</View></View>;
+function OptionRow({ label, options, selected, onSelect }: { label: string; options: readonly string[]; selected: string; onSelect: (value: string) => void }) {
+  return <View style={styles.optionsSection}><Text style={styles.optionTitle}>{label}</Text><View style={styles.options}>{options.map((option) => <Pressable accessibilityRole="button" accessibilityState={{ selected: option === selected }} key={option} onPress={() => onSelect(option)} style={[styles.option, option === selected && styles.optionSelected]}><Text style={[styles.optionText, option === selected && styles.optionTextSelected]}>{option}</Text></Pressable>)}</View></View>;
 }
 
 const styles = StyleSheet.create({
   screen: { backgroundColor: colors.canvas, flex: 1 },
-  keyboard: { flex: 1 },
+  optionsGroup: { gap: spacing.md },
   header: { alignItems: 'center', flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   headerCopy: { flex: 1, gap: 2 }, headerTitle: { color: colors.text, fontSize: 20, fontWeight: '800' }, headerDetail: { color: colors.textMuted, fontSize: 12 },
   scroll: { gap: spacing.md, paddingHorizontal: spacing.lg }, intro: { alignItems: 'center', flexDirection: 'row', gap: spacing.sm, padding: spacing.md }, introIcon: { alignItems: 'center', backgroundColor: '#251D42', borderRadius: radius.md, height: 48, justifyContent: 'center', width: 48 }, introCopy: { flex: 1, gap: 3 }, introTitle: { color: colors.text, fontSize: 15, fontWeight: '800' }, introDetail: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },
   prompt: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, color: colors.text, fontSize: 16, lineHeight: 22, minHeight: 144, padding: spacing.md }, helper: { color: colors.textSubtle, fontSize: 12, marginTop: -spacing.xs },
-  optionsSection: { gap: spacing.xs }, optionTitle: { color: colors.textMuted, fontSize: 13, fontWeight: '700' }, options: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }, option: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth, minHeight: 38, paddingHorizontal: 14, justifyContent: 'center' }, optionSelected: { backgroundColor: '#2A2147', borderColor: colors.violet }, optionDisabled: { opacity: 0.55 }, optionText: { color: colors.textMuted, fontSize: 13, fontWeight: '700' }, optionTextSelected: { color: colors.text },
+  optionsSection: { gap: spacing.xs }, optionTitle: { color: colors.textMuted, fontSize: 13, fontWeight: '700' }, options: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }, option: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.pill, borderWidth: StyleSheet.hairlineWidth, minHeight: 38, paddingHorizontal: 14, justifyContent: 'center' }, optionSelected: { backgroundColor: '#2A2147', borderColor: colors.violet }, optionText: { color: colors.textMuted, fontSize: 13, fontWeight: '700' }, optionTextSelected: { color: colors.text },
   quoteCard: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', padding: spacing.md }, quoteLabel: { color: colors.text, fontSize: 15, fontWeight: '800' }, quoteDetail: { color: colors.textMuted, fontSize: 12, marginTop: 3 }, quoteCredits: { color: colors.mint, fontSize: 16, fontWeight: '800' }, balance: { color: colors.textMuted, fontSize: 12, marginTop: -spacing.xs }, balanceWarning: { color: colors.danger },
   error: { backgroundColor: '#2A1822', borderColor: '#643044', borderWidth: StyleSheet.hairlineWidth, padding: spacing.md }, errorText: { color: '#FFC3D1', fontSize: 13, lineHeight: 19 }, confirmation: { gap: spacing.sm, padding: spacing.md }, confirmationTitle: { color: colors.text, fontSize: 16, fontWeight: '800' }, confirmationDetail: { color: colors.textMuted, fontSize: 13, lineHeight: 19 }, editAction: { alignItems: 'center', minHeight: 36, justifyContent: 'center' }, editActionText: { color: colors.violet, fontSize: 13, fontWeight: '800' },
   resultSection: { gap: spacing.xs, marginTop: spacing.md }, resultCard: { overflow: 'hidden' }, resultImage: { aspectRatio: 1, backgroundColor: colors.canvasRaised, width: '100%' }, portraitResult: { aspectRatio: 9 / 16 }, resultCopy: { gap: 3, padding: spacing.md }, resultTitle: { color: colors.text, fontSize: 15, fontWeight: '800' }, resultDetail: { color: colors.textMuted, fontSize: 12 },

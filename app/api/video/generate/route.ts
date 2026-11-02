@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import { readSaviRequestSession } from '@/lib/auth/requestSession';
 import {
   getConfiguredVideoModel,
   SAVI_TEXT_TO_IMAGE_PROVIDER,
@@ -251,7 +251,7 @@ async function generateVideo(body: VideoRequest, validated: ReturnType<typeof va
 }
 
 export async function POST(request: NextRequest) {
-  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  const session = readSaviRequestSession(request);
   if (!session) {
     return NextResponse.json({ error: 'Please sign in before using this tool.', category: 'AUTH_REQUIRED' }, { status: 401 });
   }

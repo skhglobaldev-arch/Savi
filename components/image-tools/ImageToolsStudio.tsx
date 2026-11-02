@@ -1,5 +1,8 @@
 'use client';
 
+import { type ImageToolId, type MockupCategory, type MockupPreset, type VisualMixerCategory, imageTools, imageAspectRatios as aspectRatios, imageQualities as qualities, imageStyles as styles, sketchColors, sketchBrushSizes, mockupCategories, mockupPresets, visualMixerCategories } from '@/lib/tools/catalog';
+export { imageTools } from '@/lib/tools/catalog';
+
 import { useEffect, useRef, useState } from 'react';
 import { OutputGallery, type OutputGalleryItem } from '@/components/OutputGallery';
 import { ToolSelect } from '@/components/ToolSelect';
@@ -18,21 +21,6 @@ import {
   readPrivateTextAsset
 } from '@/lib/savi/clientGeneration';
 
-type ImageToolId =
-  | 'text_to_image'
-  | 'story_sketch'
-  | 'sketch_to_image'
-  | 'instagram_post'
-  | 'product_prompt'
-  | 'edit_image'
-  | 'remove_background'
-  | 'remove_object'
-  | 'change_style'
-  | 'product_photo'
-  | 'mockup'
-  | 'visual_mixer'
-  | 'text_design'
-  | 'variations';
 
 type StoryShot = {
   id: string;
@@ -53,16 +41,8 @@ type SketchResult = {
   status: 'loading' | 'ready' | 'error';
 };
 
-type MockupCategory = 'devices' | 'clothing' | 'print';
 
-type MockupPreset = {
-  id: string;
-  label: string;
-  category: MockupCategory;
-  defaultPrompt: string;
-};
 
-type VisualMixerCategory = 'subject' | 'scene' | 'style';
 
 type VisualMixerIngredient = {
   id: string;
@@ -92,127 +72,6 @@ type PendingTextToImageRequest = {
 
 const CLOSE_ACTIVE_TOOL_EVENT = 'savi-close-active-tool';
 
-export const imageTools: Array<{
-  id: ImageToolId;
-  title: string;
-  description: string;
-  promptPlaceholder: string;
-  needsImage: boolean;
-  hiddenInstruction: string;
-}> = [
-  {
-    id: 'text_to_image',
-    title: 'Text to image',
-    description: 'Create a clean image from a written idea.',
-    promptPlaceholder: 'Example: Create a cinematic poster of a premium AI workspace on a glass desk, violet-blue glow, clean typography space, realistic studio lighting.',
-    needsImage: false,
-    hiddenInstruction: 'Generate a high-quality image from the user idea. Keep composition clean, premium, and useful.'
-  },
-  {
-    id: 'story_sketch',
-    title: 'Story Sketch',
-    description: 'Build a visual sequence shot by shot, then continue from the previous image.',
-    promptPlaceholder: 'Example: Build a six-frame story where a pomegranate falls from a tree, a child finds it, then shares it with someone in warm afternoon light.',
-    needsImage: false,
-    hiddenInstruction: 'Create a consistent cinematic storyboard sequence. Each shot should work as a realistic frame and preserve style continuity from earlier shots.'
-  },
-  {
-    id: 'sketch_to_image',
-    title: 'Sketch to image',
-    description: 'Draw a rough idea, add a prompt, and turn it into a polished image.',
-    promptPlaceholder: 'Example: Turn this rough sketch into a realistic collectible fashion doll on a dark grid background, premium materials, clean product lighting.',
-    needsImage: false,
-    hiddenInstruction: 'Use the canvas sketch as a reference. Preserve the rough layout and turn it into a polished generated image.'
-  },
-  {
-    id: 'instagram_post',
-    title: 'Instagram post from image',
-    description: 'Upload an image and create a hook, caption, hashtags, and post idea.',
-    promptPlaceholder: 'Example: Turn this cafe portrait into a stylish Instagram post with one bold hook, a short caption, 8 hashtags, and a soft premium brand tone.',
-    needsImage: true,
-    hiddenInstruction: 'Analyze the provided image and create a short Instagram post package with hook, caption, content angle, and hashtags.'
-  },
-  {
-    id: 'product_prompt',
-    title: 'Product photo prompt',
-    description: 'Turn a product idea into a premium product photography prompt.',
-    promptPlaceholder: 'Example: SAVI daily hydration cream on warm stone with eucalyptus, dewy texture, soft morning window light, calm luxury skincare campaign.',
-    needsImage: false,
-    hiddenInstruction: 'Create a detailed product photography prompt with subject, surface, lighting, composition, camera, mood, and usage notes.'
-  },
-  {
-    id: 'edit_image',
-    title: 'Edit image',
-    description: 'Change details while keeping the original subject consistent.',
-    promptPlaceholder: 'Example: Keep the person exactly the same, change the cafe into a clean luxury studio, soften the light, and preserve face, pose, and framing.',
-    needsImage: true,
-    hiddenInstruction: 'Edit the provided image based on the user request while preserving the main subject and identity.'
-  },
-  {
-    id: 'remove_background',
-    title: 'Remove or change background',
-    description: 'Remove the background or replace it with a new scene.',
-    promptPlaceholder: 'Example: Remove only the background and place the subject on a soft white studio backdrop. Keep hair edges, shadows, and subject untouched.',
-    needsImage: true,
-    hiddenInstruction: 'Mask the background only. Preserve the subject exactly and create a clean transparent or requested background.'
-  },
-  {
-    id: 'remove_object',
-    title: 'Remove object',
-    description: 'Remove one unwanted object and rebuild the area naturally.',
-    promptPlaceholder: 'Example: Remove the person in the back-right corner and rebuild the cafe wall, shelves, and lighting naturally. Do not change the main subject.',
-    needsImage: true,
-    hiddenInstruction: 'Remove only the target object described by the user. Preserve the rest of the image and avoid changing the subject.'
-  },
-  {
-    id: 'change_style',
-    title: 'Change clothes or style',
-    description: 'Change outfit, color, material, or visual style without changing identity.',
-    promptPlaceholder: 'Example: Change only the outfit to a matte charcoal blazer and silk top. Keep the face, pose, hair, lighting, and background unchanged.',
-    needsImage: true,
-    hiddenInstruction: 'Change the requested clothing or style while preserving face, pose, body shape, lighting direction, and image structure.'
-  },
-  {
-    id: 'product_photo',
-    title: 'Product photo',
-    description: 'Turn a product reference into a premium ad-style product image.',
-    promptPlaceholder: 'Example: Use this product as the hero item on a reflective white glass surface, botanical props, soft shadow, high-end ecommerce campaign look.',
-    needsImage: true,
-    hiddenInstruction: 'Create a polished product photography output using the reference image and the requested campaign style.'
-  },
-  {
-    id: 'mockup',
-    title: 'Mockup',
-    description: 'Place a logo or design onto devices, clothing, print, or a custom surface.',
-    promptPlaceholder: 'Example: Place this logo naturally on a matte black laptop screen in a modern studio, realistic perspective, soft reflections, no extra branding.',
-    needsImage: true,
-    hiddenInstruction: 'Create a photorealistic mockup. Use the first uploaded image as the logo or design, then place it naturally on the selected product or surface with realistic lighting, perspective, shadows, and material texture.'
-  },
-  {
-    id: 'visual_mixer',
-    title: 'Visual mixer',
-    description: 'Blend a subject, scene, and style into one finished image.',
-    promptPlaceholder: 'Example: Blend the selected subject, scene, and style into one premium hero image for a calm skincare launch, natural light, clean composition.',
-    needsImage: false,
-    hiddenInstruction: 'Blend the selected subject, scene, and style references into one cohesive premium image. Preserve the strongest visual cues from each category without making a collage.'
-  },
-  {
-    id: 'text_design',
-    title: 'Text and poster design',
-    description: 'Create readable text, poster layouts, badges, labels, or covers.',
-    promptPlaceholder: 'Example: Design a clean launch poster that says “Ask. Create. Organise.” with SAVI branding, purple-blue glow, readable premium layout.',
-    needsImage: false,
-    hiddenInstruction: 'Create a clean graphic layout with accurate readable text, strong hierarchy, and premium spacing.'
-  },
-  {
-    id: 'variations',
-    title: 'Create variation',
-    description: 'Create one polished alternative while keeping the core visual direction consistent.',
-    promptPlaceholder: 'Example: Create a warmer seasonal variation of this product ad with golden light, premium texture, and the product still clearly recognisable.',
-    needsImage: true,
-    hiddenInstruction: 'Create one distinct variation while preserving the main subject, product, and brand direction.'
-  }
-];
 
 const imageToolCategories: Record<ImageToolId, 'Create' | 'Edit' | 'Product'> = {
   text_to_image: 'Create',
@@ -231,121 +90,8 @@ const imageToolCategories: Record<ImageToolId, 'Create' | 'Edit' | 'Product'> = 
   visual_mixer: 'Product'
 };
 
-const aspectRatios = ['1:1', '4:5', '9:16', '16:9'] as const;
-const qualities = ['720', '1080', '4K'] as const;
-const styles = ['Realistic', 'Product', 'Editorial', '3D', 'Minimal', 'Cinematic'] as const;
-const sketchColors = ['#ffffff', '#111827', '#ef4444', '#f59e0b', '#22c55e', '#38bdf8', '#2563eb', '#7c3aed', '#ec4899'];
-const sketchBrushSizes = [4, 10, 34] as const;
-const mockupCategories: Array<{ id: MockupCategory; label: string }> = [
-  { id: 'devices', label: 'Devices' },
-  { id: 'clothing', label: 'Clothing' },
-  { id: 'print', label: 'Print' }
-];
 
-const mockupPresets: MockupPreset[] = [
-  {
-    id: 'laptop',
-    label: 'Laptop',
-    category: 'devices',
-    defaultPrompt: 'Place this design perfectly onto the screen of a modern, generic unbranded laptop sitting on a clean wooden desk in a minimalist office. Close-up shot.'
-  },
-  {
-    id: 'phone',
-    label: 'Phone',
-    category: 'devices',
-    defaultPrompt: 'Place this design onto the screen of a generic unbranded smartphone being held by a person outdoors in bright natural light. Close-up shot.'
-  },
-  {
-    id: 'tv',
-    label: 'TV',
-    category: 'devices',
-    defaultPrompt: 'Place this design on a generic unbranded wide-screen wall-mounted TV in a calm modern living room.'
-  },
-  {
-    id: 'shirt',
-    label: 'T-shirt',
-    category: 'clothing',
-    defaultPrompt: 'Show this design printed onto a plain solid-color t-shirt resting on a wooden floor. Close-up product mockup.'
-  },
-  {
-    id: 'hat',
-    label: 'Cap',
-    category: 'clothing',
-    defaultPrompt: 'Show this design embroidered onto a clean cap resting on a desk. Extreme close-up macrophotography with realistic thread texture.'
-  },
-  {
-    id: 'tote',
-    label: 'Tote bag',
-    category: 'clothing',
-    defaultPrompt: 'Print this design clearly onto the front of a minimalist canvas tote bag being carried by a person.'
-  },
-  {
-    id: 'pin',
-    label: 'Enamel pin',
-    category: 'clothing',
-    defaultPrompt: 'Create a small gold-edged enamel pin with this design on a denim jacket. Close-up macrophotography.'
-  },
-  {
-    id: 'book',
-    label: 'Book cover',
-    category: 'print',
-    defaultPrompt: 'Print this design onto the cover of a hardcover book resting on a coffee table, overhead view. No extra title, no extra text, just the design.'
-  },
-  {
-    id: 'poster',
-    label: 'Poster',
-    category: 'print',
-    defaultPrompt: 'Place this design inside a minimalist black frame hanging on a clean white gallery wall with professional lighting.'
-  },
-  {
-    id: 'window',
-    label: 'Window decal',
-    category: 'print',
-    defaultPrompt: 'Place this design as a small transparent vinyl decal sticker on a large glass coffee shop window. Close-up shot. No people.'
-  },
-  {
-    id: 'billboard',
-    label: 'Billboard',
-    category: 'print',
-    defaultPrompt: 'Put this design as a massive advertisement on a giant outdoor street billboard in a busy metropolitan city center.'
-  },
-  {
-    id: 'mural',
-    label: 'Mural',
-    category: 'print',
-    defaultPrompt: 'Paint this design as a large mural directly onto the side of a warm brick building in a sunny city street.'
-  }
-];
 
-const visualMixerCategories: Array<{
-  id: VisualMixerCategory;
-  title: string;
-  description: string;
-  placeholder: string;
-  ideas: string[];
-}> = [
-  {
-    id: 'subject',
-    title: 'Subject',
-    description: 'Main person, product, object, or character.',
-    placeholder: 'Example: a premium skincare jar with a glass lid',
-    ideas: ['SAVI hydration cream jar', 'a futuristic desk lamp', 'a fashion portrait with soft makeup']
-  },
-  {
-    id: 'scene',
-    title: 'Scene',
-    description: 'Environment, location, lighting, or moment.',
-    placeholder: 'Example: warm spa bathroom with natural morning light',
-    ideas: ['warm wooden bathroom shelf', 'minimal studio with white glass', 'modern cafe with soft window light']
-  },
-  {
-    id: 'style',
-    title: 'Style',
-    description: 'Visual language, mood, material, or art direction.',
-    placeholder: 'Example: editorial product photography, clean, premium, realistic',
-    ideas: ['editorial product photography', 'cinematic soft realism', 'minimal 3D clay render']
-  }
-];
 
 const emptyVisualMixerBriefs: Record<VisualMixerCategory, string> = {
   subject: '',

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument } from 'pdf-lib';
-import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import { readSaviRequestSession } from '@/lib/auth/requestSession';
 import { createSaviRateLimitResponse, checkSaviRateLimit } from '@/lib/savi/rateLimit';
 import { getSaviRequestIdentity } from '@/lib/savi/requestIdentity';
 import { logOperational } from '@/lib/observability/logger';
@@ -15,7 +15,7 @@ function isPdfFile(value: FormDataEntryValue | null): value is File {
 }
 
 export async function POST(request: NextRequest) {
-  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  const session = readSaviRequestSession(request);
   if (!session) {
     return NextResponse.json({ error: 'Please sign in before previewing a PDF.', category: 'AUTH_REQUIRED' }, { status: 401 });
   }

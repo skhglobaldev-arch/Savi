@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createClientPdfPages } from './clientValidation.ts';
 import { buildPdfPagePlan, getPdfWorkflowState, PDF_PREVIEW_COST, SAVI_EXTRACT_IMAGES_AVAILABLE } from './workflowState.ts';
+import { fileTools } from '../tools/catalog.ts';
 
 const studioSource = readFileSync(new URL('../../components/file-tools/FileToolsStudio.tsx', import.meta.url), 'utf8');
 
@@ -86,7 +87,7 @@ test('organize has non-drag reorder controls and rotation/remove actions', () =>
 });
 
 test('Split is a first-class workspace with a visible primary action', () => {
-  assert.match(studioSource, /id: 'split'/);
+  assert.ok(fileTools.some(tool => tool.id === 'split'));
   assert.match(studioSource, /data-testid="split-workspace"/);
   assert.match(studioSource, /label="Split PDF"/);
 });
@@ -111,7 +112,7 @@ test('success state exposes download and process-another actions', () => {
 
 test('Extract Images cannot silently charge while unavailable', () => {
   assert.equal(SAVI_EXTRACT_IMAGES_AVAILABLE, false);
-  assert.match(studioSource, /available: SAVI_EXTRACT_IMAGES_AVAILABLE/);
+  assert.equal(fileTools.find(tool => tool.id === 'extract_images')?.available, false);
   assert.match(studioSource, /data-testid="extract-images-unavailable"/);
   const extractSection = studioSource.slice(studioSource.indexOf('function renderExtractImagesTool'), studioSource.indexOf('function renderAiDocumentTool'));
   assert.doesNotMatch(extractSection, /runProcess\('extract_images'\)/);

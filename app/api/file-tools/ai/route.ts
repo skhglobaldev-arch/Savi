@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument } from 'pdf-lib';
-import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import { readSaviRequestSession } from '@/lib/auth/requestSession';
 import { getConfiguredTextModel, SAVI_AI_PDF_TOOL_IDS, SAVI_TEXT_TO_IMAGE_PROVIDER } from '@/lib/pricing/saviPricing';
 import { runProtectedOperation } from '@/lib/savi/protectedOperations';
 import { SaviInfrastructureError } from '@/lib/savi/textToImageInfrastructure';
@@ -142,7 +142,7 @@ async function generateAiPdfText(input: { toolId: AiPdfToolId; prompt: string; f
 }
 
 export async function POST(request: NextRequest) {
-  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  const session = readSaviRequestSession(request);
   if (!session) return NextResponse.json({ error: 'Please sign in before using this tool.', category: 'AUTH_REQUIRED' }, { status: 401 });
 
   const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'FILE_PROCESSING', identity: getSaviRequestIdentity(request, session.id) });
@@ -199,7 +199,7 @@ export async function POST(request: NextRequest) {
     }
     if (!generatedText) {
       const stored = await fetch(new URL(`/api/assets/${result.assetId}`, request.url), {
-        headers: { cookie: request.headers.get('cookie') || '' },
+        headers: { cookie: request.headers.get('cookie') || '', authorization: request.headers.get('authorization') || '' },
         cache: 'no-store'
       });
       generatedText = stored.ok ? (await stored.text()).slice(0, 100_000) : '';

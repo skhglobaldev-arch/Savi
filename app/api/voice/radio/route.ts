@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import { readSaviRequestSession } from '@/lib/auth/requestSession';
 import {
   estimateSaviVoiceReservationSeconds,
   getConfiguredTtsModel,
@@ -183,7 +183,7 @@ async function generateAudio(input: { script: string; voice: string; style: stri
 }
 
 export async function POST(request: NextRequest) {
-  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  const session = readSaviRequestSession(request);
   if (!session) {
     return NextResponse.json({ error: 'Please sign in before using this tool.', category: 'AUTH_REQUIRED' }, { status: 401 });
   }

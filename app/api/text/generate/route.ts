@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import { readSaviRequestSession } from '@/lib/auth/requestSession';
 import {
   getConfiguredTextModel,
   SAVI_IMAGE_TEXT_TOOL_IDS,
@@ -158,7 +158,7 @@ async function generateText(toolId: string, prompt: string, reference: ReturnTyp
 }
 
 export async function POST(request: NextRequest) {
-  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  const session = readSaviRequestSession(request);
   if (!session) {
     return NextResponse.json({ error: 'Please sign in before using this tool.', category: 'AUTH_REQUIRED' }, { status: 401 });
   }
@@ -211,7 +211,7 @@ export async function POST(request: NextRequest) {
 
     if (!generatedText) {
       const stored = await fetch(new URL(`/api/assets/${result.assetId}`, request.url), {
-        headers: { cookie: request.headers.get('cookie') || '' },
+        headers: { cookie: request.headers.get('cookie') || '', authorization: request.headers.get('authorization') || '' },
         cache: 'no-store'
       });
       generatedText = stored.ok ? (await stored.text()).slice(0, 20_000) : '';

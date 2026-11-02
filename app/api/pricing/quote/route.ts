@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument } from 'pdf-lib';
-import { readSessionToken, SAVI_SESSION_COOKIE } from '@/lib/auth/session';
+import { readSaviRequestSession } from '@/lib/auth/requestSession';
 import {
   getConfiguredTextModel,
   getConfiguredTextToImageModel,
@@ -53,7 +53,7 @@ function isPdfFile(value: FormDataEntryValue | null): value is File {
 }
 
 export async function GET(request: NextRequest) {
-  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  const session = readSaviRequestSession(request);
   if (!session) return NextResponse.json({ error: 'Please sign in to view a SAVI quote.', category: 'AUTH_REQUIRED' }, { status: 401 });
 
   try {
@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
  * a GenerationJob, ledger entry, or storage object.
  */
 export async function POST(request: NextRequest) {
-  const session = readSessionToken(request.cookies.get(SAVI_SESSION_COOKIE)?.value);
+  const session = readSaviRequestSession(request);
   if (!session) return NextResponse.json({ error: 'Please sign in to view a SAVI quote.', category: 'AUTH_REQUIRED' }, { status: 401 });
 
   const rateLimit = await checkSaviRateLimit({ rateLimitClass: 'FILE_PROCESSING', identity: getSaviRequestIdentity(request, session.id) });

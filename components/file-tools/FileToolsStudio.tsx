@@ -1,5 +1,8 @@
 'use client';
 
+import { type FileToolId, fileTools } from '@/lib/tools/catalog';
+export { fileTools } from '@/lib/tools/catalog';
+
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { ToolPreview } from '@/components/ToolPreview';
 import { ToolActionBar, ToolCategoryTabs, ToolFieldLabel, ToolHeader, ToolResultEmpty, ToolStatus } from '@/components/SaviToolUI';
@@ -19,7 +22,6 @@ import {
   revokeOwnedObjectUrl
 } from '@/lib/savi/clientGeneration';
 
-type FileToolId = 'merge' | 'organize' | 'split' | 'jpg' | 'extract_images' | 'contract_summary' | 'explain_document' | 'translate_summary' | 'pdf_podcast';
 type OutputFile = { url: string; filename: string; label: string };
 
 type PdfFileItem = {
@@ -41,79 +43,6 @@ type PageItem = {
   selected: boolean;
 };
 
-export const fileTools: Array<{
-  id: FileToolId;
-  title: string;
-  description: string;
-  promptPlaceholder: string;
-  group: 'PDF tools' | 'AI document';
-  available?: boolean;
-}> = [
-  {
-    id: 'merge',
-    title: 'Merge PDF',
-    description: 'Upload multiple PDFs, reorder them, then export one clean PDF.',
-    promptPlaceholder: 'Example: Put the signed contract first, then the invoice, then the appendix. Keep the file name clear and ready to send.',
-    group: 'PDF tools'
-  },
-  {
-    id: 'organize',
-    title: 'Organize pages',
-    description: 'Preview pages, drag to reorder, rotate, remove, or export selected pages.',
-    promptPlaceholder: 'Example: Swap page 1 and page 2, rotate page 3 clockwise, remove blank pages, then export one clean PDF.',
-    group: 'PDF tools'
-  },
-  {
-    id: 'split',
-    title: 'Split PDF',
-    description: 'Choose the pages to export as a separate PDF with a clear page-by-page view.',
-    promptPlaceholder: '',
-    group: 'PDF tools'
-  },
-  {
-    id: 'jpg',
-    title: 'PDF to JPG',
-    description: 'Choose exact PDF pages and export them as high-quality JPG files in one ZIP.',
-    promptPlaceholder: 'Example: Convert pages 1, 3, and 4 to high-quality JPG files in one ZIP, ready to share.',
-    group: 'PDF tools'
-  },
-  {
-    id: 'extract_images',
-    title: 'Extract PDF images',
-    description: 'Pull the original embedded images from a PDF into one downloadable ZIP.',
-    promptPlaceholder: 'Example: Extract every original image embedded in this PDF and package them in one ZIP file.',
-    group: 'PDF tools',
-    available: SAVI_EXTRACT_IMAGES_AVAILABLE
-  },
-  {
-    id: 'contract_summary',
-    title: 'Summarize this contract',
-    description: 'Upload a contract and get key points, risks, obligations, and next actions.',
-    promptPlaceholder: 'Example: Summarize this contract in plain language. Highlight payment terms, deadlines, cancellation terms, risks, and what I should check before signing.',
-    group: 'AI document'
-  },
-  {
-    id: 'explain_document',
-    title: 'Explain this document simply',
-    description: 'Upload a PDF and turn complicated content into beginner-friendly notes.',
-    promptPlaceholder: 'Example: Explain this document like I am new to the topic. Tell me what it means, what matters, and what I should do next.',
-    group: 'AI document'
-  },
-  {
-    id: 'translate_summary',
-    title: 'Translate PDF and summarize it',
-    description: 'Upload a PDF, translate the main content, and get a clear summary.',
-    promptPlaceholder: 'Example: Translate the important parts into Persian, then give me a short summary, key decisions, and any names, dates, or prices.',
-    group: 'AI document'
-  },
-  {
-    id: 'pdf_podcast',
-    title: 'Turn PDF into podcast',
-    description: 'Upload a PDF and create a radio-style podcast script from its key points.',
-    promptPlaceholder: 'Example: Turn this PDF into a 2-minute radio podcast script with a warm intro, three clear talking points, and a practical ending.',
-    group: 'AI document'
-  }
-];
 
 const templateToFileTool: Record<string, FileToolId> = {
   'summarize-contract': 'contract_summary',
